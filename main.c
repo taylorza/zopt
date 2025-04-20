@@ -493,7 +493,7 @@ static void substitute_line(const char* templ, char* bindings[10], char *result)
 }
 
 void apply_replacement(Rule* rule, char** bindings, int8_t out_fd) {
-    zx_border(4);
+    zx_border(1);
     for (int i = 0; i < rule->replacement_linecount; i++) {
         const char* line = rule->replacement_lines[i];
         const char* line_body = line;
@@ -513,7 +513,7 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
     }
 
     while (window_size > 0) {
-        zx_border(3);
+        zx_border(0);
         uint8_t rule_applied = 0;
         for (int r = 0; !rule_applied && r < rule_count; ++r) {
             // check we have enough lines in the code window

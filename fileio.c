@@ -131,7 +131,7 @@ int16_t write_line(int8_t f, char *buf, int16_t size) {
     }
     write_count = write_byte(fi, '\n');
     if (write_count == -1) return -1;
-    zx_border(2);
+    zx_border(0);
         
     return byteswritten;
 }
