@@ -1,0 +1,19 @@
+{
+    "files.associations": {
+        "*.asm": "asm-collection",
+        "stdint.h": "c",
+        "stddef.h": "c",
+        "ctype.h": "c",
+        "string.h": "c",
+        "esxdos.h": "c",
+        "arch.h": "c",
+        "config_zxn.h": "c",
+        "config_zx.h": "c",
+        "stdlib.h": "c",
+        "stdbool.h": "c",
+        "stdio.h": "c",
+        "zxn.h": "c",
+        "dataarea.h": "c",
+        "fileio.h": "c"
+    }
+}

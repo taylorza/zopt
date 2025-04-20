@@ -1,0 +1,158 @@
+# Rule: Eliminate jump to next line
+pattern:
+  jp $1
+$1
+replacement:
+$1
+
+# Rule: Optimize const addition
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+  add hl,de
+constraints:
+  (($1 isnumeric) ($2 isnumeric) and)
+replacement:
+  ld hl,$eval($1 $2 +)
+
+# Rule: Optimize const multiplication
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+  call ccmult
+constraints:
+  (($1 isnumeric) ($2 isnumeric) and)
+replacement:
+  ld hl,$eval($1 $2 *)
+
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+replacement:
+  ld de,$1
+  ld hl,$2
+
+pattern:
+  push hl
+  ld hl,$1
+  pop de
+  ex de,hl
+replacement:  
+  ld de,$1
+
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,1
+  pop de
+  add hl,de
+  ld $1,hl
+replacement:
+  ld hl,$1
+  inc hl
+  ld $1,hl
+
+pattern:
+  push hl
+  ld hl,1
+  pop de
+  add hl,de
+replacement:
+  inc hl
+
+pattern:
+  push hl
+  ld hl,1
+  pop de
+  ex de,hl
+  xor a
+  sbc de,hl
+replacement:
+  dec hl
+
+pattern:
+  ld de,$1
+  ld hl,1
+  add hl,de
+  ld $1,hl
+replacement:
+  ld hl,$1
+  inc hl
+  ld $1,hl
+
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,_$2
+  pop de
+  add hl,de
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld hl,_$2+$1
+
+pattern:
+  ld hl,$1
+  add hl,hl
+  push hl
+  ld hl,_$2
+  pop de
+  add hl,de
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld hl,_$2+$eval($1 2 *)
+
+# Rule: Optimize expressions with locals
+pattern:
+  ld h,$1
+  ld l,$2
+  push hl
+  ld h,$3
+  ld l,$4
+  pop de
+replacement:
+  ld d,$1
+  ld e,$2
+  ld h,$3
+  ld l,$4
+
+pattern:
+  ld h,$1
+  ld l,$2
+  push hl
+  ld hl,$3
+  pop de
+replacement:
+  ld d,$1
+  ld e,$2
+  ld hl,$3
+
+  # Rule: Optimize char literal or int variable into char
+pattern:
+  ld hl,$1
+  ld a,l
+replacement:
+  ld a,$1
+
+# Rule: Optimize char variable load
+pattern:
+  ld a,$1
+  call ccsxt
+  ld a,l
+replacement:
+  ld a,$1
+
+# Rule: Optimize char variable load from local
+pattern:
+  ld h,$1
+  ld l,$2
+  ld a,l
+replacement:
+  ld a,$2
