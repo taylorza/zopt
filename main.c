@@ -159,11 +159,18 @@ typedef enum {
     tokLParen,
     tokRParen,
     tokIsNumeric,
+    tokStartsWith,
     tokPlus,
     tokMinus,
     tokTimes,
     tokDivide,
     tokMod,
+    tokLt,
+    tokGt,
+    tokLe,
+    tokGe,
+    tokEq,
+    tokNe,
     tokAnd,
     tokOr,
     tokXor,
@@ -208,6 +215,23 @@ TokenType get_token(void) {
         case '*': *temp++ = *tokptr++; tok = tokTimes; break;
         case '/': *temp++ = *tokptr++; tok = tokDivide; break;
         case '%': *temp++ = *tokptr++; tok = tokMod; break;
+        case '<': *temp++ = *tokptr++; tok = tokLt; 
+            if (*tokptr == '=') {
+                *temp++ = *tokptr++;
+                tok = tokLe;
+            }
+            else if (*tokptr == '>') {
+                *temp++ = *tokptr++;
+                tok = tokNe;
+            }
+            break;
+        case '>': *temp++ = *tokptr++; tok = tokGt;
+            if (*tokptr == '=') {
+                *temp++ = *tokptr++;
+                tok = tokGe;
+            }
+            break;
+        case '=': *temp++ = *tokptr++; tok = tokEq; break;        
         case '$':
             tokptr++; // skip '$'            
             if (*tokptr == '$') {
@@ -226,7 +250,7 @@ TokenType get_token(void) {
         case '\'':
         {
             char terminator = *tokptr;
-            get_token(); // skip quote
+            tokptr++; // skip quote
             while (*tokptr && *tokptr != terminator) {
                 *temp++ = *tokptr++;
             }
@@ -248,6 +272,7 @@ TokenType get_token(void) {
                 }
                 *temp = '\0';
                 if (strcmp(token, "isnumeric") == 0) tok = tokIsNumeric;
+                else if (strcmp(token, "startswith") == 0) tok = tokStartsWith;
                 else if (strcmp(token, "and") == 0) tok = tokAnd;
                 else if (strcmp(token, "or") == 0) tok = tokOr;
                 else if (strcmp(token, "xor") == 0) tok = tokXor;
@@ -283,21 +308,44 @@ void eval_binop(TokenType op) {
     if (top < 2) error("invalid expression");
     Value x = stack[--top];
     Value y = stack[--top];
-    switch (op) {
-        case tokPlus: x.intval = x.intval + y.intval; break;
-        case tokMinus: x.intval = x.intval - y.intval; break;
-        case tokTimes: x.intval = x.intval * y.intval; break;
-        case tokDivide: x.intval = x.intval / y.intval; break;
-        case tokMod: x.intval = x.intval % y.intval; break;
-        case tokAnd: x.intval = (x.intval != 0) && (y.intval != 0); break;
-        case tokOr: x.intval = (x.intval != 0) || (y.intval != 0); break;
-        case tokXor: x.intval = (x.intval && !y.intval) || (!x.intval && y.intval); break;
+    if (x.vt == vtInt && y.vt == vtInt) {
+        switch (op) {
+            case tokPlus: x.intval = x.intval + y.intval; break;
+            case tokMinus: x.intval = x.intval - y.intval; break;
+            case tokTimes: x.intval = x.intval * y.intval; break;
+            case tokDivide: x.intval = x.intval / y.intval; break;
+            case tokMod: x.intval = x.intval % y.intval; break;
+            case tokLt: x.intval = (x.intval < y.intval); break;
+            case tokGt: x.intval = (x.intval > y.intval); break;
+            case tokLe: x.intval = (x.intval <= y.intval); break;
+            case tokGe: x.intval = (x.intval >= y.intval); break;
+            case tokEq: x.intval = (x.intval == y.intval); break;
+            case tokNe: x.intval = (x.intval != y.intval); break;
+            case tokAnd: x.intval = (x.intval != 0) && (y.intval != 0); break;
+            case tokOr: x.intval = (x.intval != 0) || (y.intval != 0); break;
+            case tokXor: x.intval = (x.intval && !y.intval) || (!x.intval && y.intval); break;
+        }
+    }
+    else if (x.vt == vtString && y.vt == vtString) {
+        int r = strcmp(x.strval, y.strval);
+        switch (op) {
+            case tokLt: x.intval = r < 0; break;
+            case tokGt: x.intval = r > 0; break;
+            case tokLe: x.intval = (r <= 0); break;
+            case tokGe: x.intval = (r >= 0); break;
+            case tokEq: x.intval = (r == 0); break;
+            case tokNe: x.intval = (r != 0); break;
+        }
+        x.vt = vtInt;
+    }
+    else {
+        error("invalid expression");
     }
     stack[top++] = x;
 }
 
 int eval_expression(const char* expr, char* bindings[10]) {
-    Value v;
+    Value v1, v2;
     top = 0;
     init_tokenizer(expr);
     get_token();
@@ -305,9 +353,9 @@ int eval_expression(const char* expr, char* bindings[10]) {
         switch (tok) {
             case tokNumber:
             {
-                v.vt = vtInt;
-                v.intval = atoi(token);
-                stack[top++] = v;
+                v1.vt = vtInt;
+                v1.intval = atoi(token);
+                stack[top++] = v1;
                 get_token();
             }
             break;
@@ -316,22 +364,22 @@ int eval_expression(const char* expr, char* bindings[10]) {
                 int id = token[0] - '0';
                 if (id < 0 || id > 9) error("invalid binding");
                 if (is_numeric(bindings[id])) {
-                    v.vt = vtInt;
-                    v.intval = atoi(bindings[id]);
-                    stack[top++] = v;
+                    v1.vt = vtInt;
+                    v1.intval = atoi(bindings[id]);
+                    stack[top++] = v1;
                 }
                 else {
-                    v.vt = vtString;
-                    v.intval = bindings[id];
-                    stack[top++] = v;
+                    v1.vt = vtString;
+                    v1.strval = bindings[id];
+                    stack[top++] = v1;
                 }
                 get_token();
             }
             break;
             case tokLiteral:
-                v.vt = vtString;
-                v.strval = hash(token);
-                stack[top++] = v;
+                v1.vt = vtString;
+                v1.strval = hash(token);
+                stack[top++] = v1;
                 get_token();
                 break;
             case tokPlus:
@@ -339,6 +387,12 @@ int eval_expression(const char* expr, char* bindings[10]) {
             case tokTimes:
             case tokDivide:
             case tokMod:
+            case tokLt:
+            case tokGt:
+            case tokLe:
+            case tokGe:
+            case tokEq:
+            case tokNe:
             case tokAnd:
             case tokOr:
             case tokXor:
@@ -346,12 +400,29 @@ int eval_expression(const char* expr, char* bindings[10]) {
                 get_token();
                 break;
             case tokIsNumeric:
-                v = stack[--top];
-                if (v.vt == vtInt) v.intval = 1;
-                else if (is_numeric(v.strval)) v.intval = 1;
-                else v.intval = 0;
-                v.vt = vtInt;
-                stack[top++] = v;
+                v1 = stack[--top];
+                if (v1.vt == vtInt) v1.intval = 1;
+                else if (is_numeric(v1.strval)) v1.intval = 1;
+                else v1.intval = 0;
+                v1.vt = vtInt;
+                stack[top++] = v1;
+                get_token();
+                break;
+            case tokStartsWith:
+                v1 = stack[--top];
+                v2 = stack[--top];
+                if (v1.vt == vtString && v2.vt == vtString) {
+                    char* prefix = v1.strval;
+                    char* str = v2.strval;
+                    v1.intval = (strncmp(str, prefix, strlen(prefix)) == 0);
+                    v1.vt = vtInt;
+                    stack[top++] = v1;
+                }
+                else {
+                    v1.vt = vtInt;
+                    v1.intval = 0;
+                    stack[top++] = v1;
+                }
                 get_token();
                 break;
             case tokLParen:
@@ -361,7 +432,7 @@ int eval_expression(const char* expr, char* bindings[10]) {
         }
     }
 
-    if (top != 1 || stack[0].vt != vtInt) error("invalid expresison");
+    if (top != 1 || stack[0].vt != vtInt) error("invalid expression");
     return stack[0].intval;
 }
 
@@ -443,7 +514,7 @@ int match_rule(Rule* rule, char** window, int window_size, char* bindings[10]) {
     return rule->pattern_linecount;
 }
 
-static void substitute_line(const char* templ, char* bindings[10], char *result) {
+static void substitute_line(const char* templ, char* bindings[10], char* result) {
     result[0] = '\0';
     const char* p = templ;
     while (*p) {
@@ -458,14 +529,14 @@ static void substitute_line(const char* templ, char* bindings[10], char *result)
                 const char* start = p + 6;
                 const char* end = start;
                 paren_depth++;
-                while(*end && paren_depth) {
-                    if(*end == '(') ++paren_depth;
-                    else if(*end==')') --paren_depth;
+                while (*end && paren_depth) {
+                    if (*end == '(') ++paren_depth;
+                    else if (*end == ')') --paren_depth;
                     ++end;
                 }
 
-                if (paren_depth != 0) error("invalid expression");                
-                
+                if (paren_depth != 0) error("invalid expression");
+
                 int expr_len = end - start;
                 char expr[MAX_LINE_LENGTH + 1];
                 if (expr_len > MAX_LINE_LENGTH)
@@ -476,7 +547,7 @@ static void substitute_line(const char* templ, char* bindings[10], char *result)
                 char buf[64];
                 sprintf(buf, "%d", evaluated);
                 strcat(result, buf);
-                p = end + 1;                
+                p = end;
             }
             else {
                 strncat(result, p, 1);
@@ -493,12 +564,14 @@ static void substitute_line(const char* templ, char* bindings[10], char *result)
 }
 
 void apply_replacement(Rule* rule, char** bindings, int8_t out_fd) {
+#ifdef __ZXNEXT
     zx_border(1);
+#endif
     for (int i = 0; i < rule->replacement_linecount; i++) {
         const char* line = rule->replacement_lines[i];
         const char* line_body = line;
         substitute_line(line_body, bindings, &tmp_line[0]);
-        write_line(out_fd, tmp_line, strlen(tmp_line));        
+        write_line(out_fd, tmp_line, strlen(tmp_line));
     }
 }
 
@@ -513,7 +586,9 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
     }
 
     while (window_size > 0) {
+#ifdef __ZXNEXT
         zx_border(0);
+#endif        
         uint8_t rule_applied = 0;
         for (int r = 0; !rule_applied && r < rule_count; ++r) {
             // check we have enough lines in the code window
@@ -608,7 +683,8 @@ int main(int argc, char** argv) {
     if (argc == 2) {
         rule_filename = "rules.opt";
         input_filename = argv[1];
-    } else {
+    }
+    else {
         rule_filename = argv[1];
         input_filename = argv[2];
     }
