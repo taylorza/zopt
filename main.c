@@ -21,18 +21,6 @@ typedef struct Rule {
     char* constraint;
 } Rule;
 
-char* trim(char* s) {
-    char* end = s + strlen(s) - 1;
-
-    while (s < end && *s == ' ')
-        ++s;
-
-    while (end >= s && *end == ' ')
-        --end;
-    end[1] = '\0';
-    return s;
-}
-
 Rule* parse_rules(const char* filename) {
     int8_t fp = open_file(filename);
     if (fp < 0) {
@@ -42,7 +30,7 @@ Rule* parse_rules(const char* filename) {
     int capacity = 5;
     Rule* rules = malloc(capacity * sizeof(Rule));
     if (rules == NULL) {
-        printf("Out of memory\n");
+        error(ERROR_OUT_OF_MEMORY);
         return NULL;
     }
 
@@ -107,7 +95,7 @@ Rule* parse_rules(const char* filename) {
                         return NULL;
                     }
                 }
-                pattern_lines[pattern_linecount++] = hash(trimmed);
+                pattern_lines[pattern_linecount++] = hash(line);
                 break;
             case STATE_IN_REPLACEMENT:
                 if (replacement_linecount >= replacement_capacity) {
@@ -122,7 +110,7 @@ Rule* parse_rules(const char* filename) {
                 break;
             case STATE_IN_CONSTRAINT:
                 if (constraint != NULL && strlen(trim(line)) != 0) {
-                    printf("multi-line constrriant not supported\n");
+                    printf("multi-line constraint not supported\n");
                     return NULL;
                 }
                 constraint = hash(trimmed);
@@ -184,11 +172,6 @@ TokenType tok;
 // Global pointer that tracks our current position in the input string.
 static const char* tokptr = NULL;
 
-void error(const char* msg) {
-    printf(msg);
-    exit(1);
-}
-
 void init_tokenizer(const char* str) {
     tokptr = str;
     paren_depth = 0;
@@ -215,7 +198,7 @@ TokenType get_token(void) {
         case '*': *temp++ = *tokptr++; tok = tokTimes; break;
         case '/': *temp++ = *tokptr++; tok = tokDivide; break;
         case '%': *temp++ = *tokptr++; tok = tokMod; break;
-        case '<': *temp++ = *tokptr++; tok = tokLt; 
+        case '<': *temp++ = *tokptr++; tok = tokLt;
             if (*tokptr == '=') {
                 *temp++ = *tokptr++;
                 tok = tokLe;
@@ -231,7 +214,7 @@ TokenType get_token(void) {
                 tok = tokGe;
             }
             break;
-        case '=': *temp++ = *tokptr++; tok = tokEq; break;        
+        case '=': *temp++ = *tokptr++; tok = tokEq; break;
         case '$':
             tokptr++; // skip '$'            
             if (*tokptr == '$') {
@@ -254,7 +237,7 @@ TokenType get_token(void) {
             while (*tokptr && *tokptr != terminator) {
                 *temp++ = *tokptr++;
             }
-            if (*tokptr != terminator) error("invalid expression");
+            if (*tokptr != terminator) error(ERROR_INVALID_EXPRESSION);
             tokptr++; // skip closing quote
             tok = tokLiteral;
         }
@@ -305,7 +288,7 @@ int is_numeric(const char* s) {
 }
 
 void eval_binop(TokenType op) {
-    if (top < 2) error("invalid expression");
+    if (top < 2) error(ERROR_INVALID_EXPRESSION);
     Value x = stack[--top];
     Value y = stack[--top];
     if (x.vt == vtInt && y.vt == vtInt) {
@@ -339,7 +322,7 @@ void eval_binop(TokenType op) {
         x.vt = vtInt;
     }
     else {
-        error("invalid expression");
+        error(ERROR_INVALID_EXPRESSION);
     }
     stack[top++] = x;
 }
@@ -362,7 +345,7 @@ int eval_expression(const char* expr, char* bindings[10]) {
             case tokVariable:
             {
                 int id = token[0] - '0';
-                if (id < 0 || id > 9) error("invalid binding");
+                if (id < 0 || id > 9) error(ERROR_INVALID_BINDING);
                 if (is_numeric(bindings[id])) {
                     v1.vt = vtInt;
                     v1.intval = atoi(bindings[id]);
@@ -432,7 +415,7 @@ int eval_expression(const char* expr, char* bindings[10]) {
         }
     }
 
-    if (top != 1 || stack[0].vt != vtInt) error("invalid expression");
+    if (top != 1 || stack[0].vt != vtInt) error(ERROR_INVALID_EXPRESSION);
     return stack[0].intval;
 }
 
@@ -451,12 +434,11 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
             while (*p && !(p[0] == '$' && isdigit(p[1])))
                 p++;
             int lit_len = p - lit_start;
-            char literal[MAX_LINE_LENGTH + 1];
             if (lit_len > 0) {
                 if (lit_len > MAX_LINE_LENGTH) lit_len = MAX_LINE_LENGTH;
-                strncpy(literal, lit_start, lit_len);
+                strncpy(tmp_line1, lit_start, lit_len);
             }
-            literal[lit_len] = '\0';
+            tmp_line1[lit_len] = '\0';
             if (lit_len == 0) {
                 /* No literal after the placeholder: grab the rest of the line */
                 if (bindings[var_index]) {
@@ -464,28 +446,27 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
                         return 0;
                 }
                 else {
-                    bindings[var_index] = _strdup(l);
+                    bindings[var_index] = hash(l);// _strdup(l);
                 }
                 l += strlen(l);
             }
             else {
-                char* pos = strstr(l, literal);
+                char* pos = strstr(l, tmp_line1);
                 if (!pos)
                     return 0;
                 int var_len = pos - l;
-                char var_val[MAX_LINE_LENGTH + 1];
                 if (var_len > MAX_LINE_LENGTH) var_len = MAX_LINE_LENGTH;
-                strncpy(var_val, l, var_len);
-                var_val[var_len] = '\0';
+                strncpy(tmp_line2, l, var_len);
+                tmp_line2[var_len] = '\0';
                 if (bindings[var_index]) {
-                    if (strcmp(bindings[var_index], var_val) != 0)
+                    if (strcmp(bindings[var_index], tmp_line2) != 0)
                         return 0;
                 }
                 else {
-                    bindings[var_index] = _strdup(var_val);
+                    bindings[var_index] = hash(tmp_line2);//_strdup(var_val);
                 }
                 l = pos;
-                if (strncmp(l, literal, lit_len) != 0)
+                if (strncmp(l, tmp_line1, lit_len) != 0)
                     return 0;
                 l += lit_len;
             }
@@ -535,7 +516,7 @@ static void substitute_line(const char* templ, char* bindings[10], char* result)
                     ++end;
                 }
 
-                if (paren_depth != 0) error("invalid expression");
+                if (paren_depth != 0) error(ERROR_INVALID_EXPRESSION);
 
                 int expr_len = end - start;
                 char expr[MAX_LINE_LENGTH + 1];
@@ -563,15 +544,19 @@ static void substitute_line(const char* templ, char* bindings[10], char* result)
     }
 }
 
-void apply_replacement(Rule* rule, char** bindings, int8_t out_fd) {
+void apply_replacement(Rule* rule, char** window, char** bindings) {
 #ifdef __ZXNEXT
     zx_border(1);
 #endif
+    char** lines = window;
+
     for (int i = 0; i < rule->replacement_linecount; i++) {
         const char* line = rule->replacement_lines[i];
         const char* line_body = line;
-        substitute_line(line_body, bindings, &tmp_line[0]);
-        write_line(out_fd, tmp_line, strlen(tmp_line));
+        substitute_line(line_body, bindings, &tmp_line1[0]);
+        //write_line(out_fd, tmp_line, strlen(tmp_line));
+        //free(lines[i]);
+        lines[i] = hash(tmp_line1);//_strdup(tmp_line);
     }
 }
 
@@ -582,68 +567,66 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
     while (window_size < max_window_size) {
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
         if (n < 0) break;
-        window[window_size++] = _strdup(line);
+        window[window_size++] = hash(line);// _strdup(line);
     }
+
+    char* bindings[10];
 
     while (window_size > 0) {
 #ifdef __ZXNEXT
         zx_border(0);
-#endif        
-        uint8_t rule_applied = 0;
-        for (int r = 0; !rule_applied && r < rule_count; ++r) {
-            // check we have enough lines in the code window
-            if (rules[r].pattern_linecount > window_size) continue;
-            char* bindings[10];
+#endif      
+        for (int r = 0; r < rule_count; ++r) {
+            Rule* rule = &rules[r];
+
             memset(bindings, 0, sizeof(bindings));
-            int matched_line_count = match_rule(&rules[r], window, window_size, bindings);
+
+            if (rule->pattern_linecount > window_size) continue;
+            int matched_line_count = match_rule(rule, window, window_size, bindings);
             if (matched_line_count) {
                 uint8_t constraints_ok = 1;
-                if (rules[r].constraint) {
-                    constraints_ok = eval_expression(rules[r].constraint, bindings);
+                if (rule->constraint) {
+                    constraints_ok = eval_expression(rule->constraint, bindings);
                 }
                 if (constraints_ok) {
-                    apply_replacement(&rules[r], bindings, out_fd);
+                    apply_replacement(rule, window, bindings);
 
-                    // free the consumed lines
-                    for (int i = 0; i < matched_line_count; ++i)
-                        free(window[i]);
+                    // Count lines of the pattern that were not replaced
+                    int count = rule->pattern_linecount - rule->replacement_linecount;
+
+                    // free the lines not replaced
+                    //for (int i = 0; i < count; ++i)
+                    //    free(window[rule->replacement_linecount + i]);
 
                     // scroll the window
-                    for (int i = matched_line_count; i < max_window_size; ++i) {
-                        window[i - matched_line_count] = window[i];
+                    window_size -= count;
+                    for (int i = rule->replacement_linecount; i < window_size; ++i) {
+                        window[i] = window[count + i];
                     }
-                    window_size -= matched_line_count;
 
                     // fill window
                     while (window_size < max_window_size) {
                         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
                         if (n < 0) break;
-                        window[window_size++] = _strdup(line);
+                        window[window_size++] = hash(line);//_strdup(line);
                     }
                     for (int i = window_size; i < max_window_size; ++i) {
                         window[i] = NULL;
                     }
-                    rule_applied = 1;
-                }
-                for (int b = 0; b < 10; ++b) {
-                    if (bindings[b]) {
-                        free(bindings[b]);
-                        bindings[b] = NULL;
-                    }
+                    r = 0; // restart the rule search
                 }
             }
         }
-        if (!rule_applied) {
-            write_line(out_fd, window[0], strlen(window[0]));
-            free(window[0]);
-            for (int i = 1; i < window_size; ++i) {
-                window[i - 1] = window[i];
-            }
-            --window_size;
-            int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
-            if (n >= 0)
-                window[window_size++] = _strdup(line);
+
+        write_line(out_fd, window[0], strlen(window[0]));
+        //free(window[0]);
+        for (int i = 1; i < window_size; ++i) {
+            window[i - 1] = window[i];
         }
+        --window_size;
+        int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
+        if (n >= 0)
+            window[window_size++] = hash(line);//_strdup(line);        
     }
     free(window);
 }
