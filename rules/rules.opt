@@ -263,3 +263,59 @@ pattern:
 replacement:
   ld de,$1
   add hl,de
+
+# Rule : HL to DE
+pattern:
+  ld h,$1
+  ld l,$2
+  ld d,h
+  ld e,l
+replacement:
+  ld d,$1
+  ld e,$2
+
+# Rule : L to B (from HL)
+pattern:
+  ld hl,$1
+  ld b,l
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld b,$1
+
+# Rule : HL to var, var to DE
+pattern:
+  ld $1,h
+  ld $2,l
+  ld d,$1
+  ld e,$2
+replacement:
+  ld $1,h
+  ld $2,l
+  ld d,h
+  ld e,l
+
+# Rule : Optimize out port <= 255
+pattern:
+  ld hl,$1
+  ld c,l
+  ld b,h
+  ld hl,$2
+  out (c),l
+constraints:
+  ($1 isnumeric) ($1 255 <=) and
+replacement:
+  ld a,$2
+  out ($1),a
+
+# Rule : Optimize out port > 255
+pattern:
+  ld hl,$1
+  ld c,l
+  ld b,h
+  ld hl,$2
+  out (c),l
+replacement:
+  ld bc,$1
+  ld a,$2
+  out (c),a

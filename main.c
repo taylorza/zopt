@@ -289,8 +289,8 @@ int is_numeric(const char* s) {
 
 void eval_binop(TokenType op) {
     if (top < 2) error(ERROR_INVALID_EXPRESSION);
-    Value x = stack[--top];
     Value y = stack[--top];
+    Value x = stack[--top];
     if (x.vt == vtInt && y.vt == vtInt) {
         switch (op) {
             case tokPlus: x.intval = x.intval + y.intval; break;
@@ -612,8 +612,7 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
                     }
                     for (int i = window_size; i < max_window_size; ++i) {
                         window[i] = NULL;
-                    }
-                    r = 0; // restart the rule search
+                    }                                       
                 }
             }
         }
