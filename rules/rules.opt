@@ -5,6 +5,78 @@ $1
 replacement:
 $1
 
+# Rule: Optimize increment byte by 1
+pattern:
+  call ccsxt
+  push hl
+  ld hl,1
+  pop de
+  add hl,de
+  ld a,l
+replacement:
+  inc a
+
+# Rule: Optimize decrement byte by 1
+pattern:
+  call ccsxt
+  push hl
+  ld hl,1
+  pop de
+  ex de,hl
+  xor a
+  sbc hl,de
+  ld a,l
+replacement:
+  dec a
+
+# Rule: Optimize byte addition
+pattern:
+  call ccsxt
+  push hl
+  ld a,$1
+  call ccsxt
+  pop de
+  add hl,de
+  ld a,l
+replacement:
+  ld b,$1
+  add a,b
+
+# Rule: Optimize byte subtraction
+pattern:
+  call ccsxt
+  push hl
+  ld a,$1
+  call ccsxt
+  pop de
+  ex de,hl
+  xor a
+  sbc hl,de
+  ld a,l
+replacement:
+  ld b,$1
+  sub a,b
+
+# Rule: Optimize increment int by 1
+pattern:
+  push hl
+  ld hl,1
+  pop de
+  add hl,de
+replacement:
+  inc hl
+
+# Rule: Optimize decrement int by 1
+pattern:
+  push hl
+  ld hl,1
+  pop de
+  ex de,hl
+  xor a
+  sbc hl,de
+replacement:
+  dec hl
+
 # Rule: Optimize const addition
 pattern:
   ld hl,$1
@@ -16,6 +88,20 @@ constraints:
   (($1 isnumeric) ($2 isnumeric) and)
 replacement:
   ld hl,$eval($1 $2 +)
+
+# Rule: Optimize const subtraction
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+  ex de,hl
+  xor a
+  add hl,de
+constraints:
+  (($1 isnumeric) ($2 isnumeric) and)
+replacement:
+  ld hl,$eval($1 $2 -)
 
 # Rule: Optimize const multiplication
 pattern:
@@ -29,6 +115,7 @@ constraints:
 replacement:
   ld hl,$eval($1 $2 *)
 
+# Rule: Optimize const load
 pattern:
   ld hl,$1
   push hl
@@ -38,6 +125,7 @@ replacement:
   ld de,$1
   ld hl,$2
 
+# Rule : Optimize load into DE
 pattern:
   push hl
   ld hl,$1
@@ -46,68 +134,15 @@ pattern:
 replacement:  
   ld de,$1
 
-pattern:
-  ld hl,$1
-  push hl
-  ld hl,1
-  pop de
-  add hl,de
-  ld $1,hl
-replacement:
-  ld hl,$1
-  inc hl
-  ld $1,hl
-
+# Rule: Optimize expressions with HL loaded
 pattern:
   push hl
-  ld hl,1
-  pop de
-  add hl,de
-replacement:
-  inc hl
-
-pattern:
-  push hl
-  ld hl,1
-  pop de
-  ex de,hl
-  xor a
-  sbc de,hl
-replacement:
-  dec hl
-
-pattern:
-  ld de,$1
-  ld hl,1
-  add hl,de
-  ld $1,hl
-replacement:
   ld hl,$1
-  inc hl
-  ld $1,hl
-
-pattern:
-  ld hl,$1
-  push hl
-  ld hl,_$2
   pop de
-  add hl,de
-constraints:
-  ($1 isnumeric)
 replacement:
-  ld hl,_$2+$1
-
-pattern:
+  ld d,h
+  ld e,l
   ld hl,$1
-  add hl,hl
-  push hl
-  ld hl,_$2
-  pop de
-  add hl,de
-constraints:
-  ($1 isnumeric)
-replacement:
-  ld hl,_$2+$eval($1 2 *)
 
 # Rule: Optimize expressions with locals
 pattern:
@@ -129,12 +164,14 @@ pattern:
   push hl
   ld hl,$3
   pop de
+constraints:
+  ($3 isnumeric) ($3 1 <>) and
 replacement:
   ld d,$1
   ld e,$2
   ld hl,$3
 
-  # Rule: Optimize char literal or int variable into char
+# Rule: Optimize char literal or int variable into char
 pattern:
   ld hl,$1
   ld a,l
@@ -156,3 +193,73 @@ pattern:
   ld a,l
 replacement:
   ld a,$2
+
+
+# Rule : Global Int array 0 Index
+pattern:
+  ld hl,0
+  add hl,hl
+  push hl
+  ld hl,$1
+  pop de
+  add hl,de
+replacement:
+  ld hl,$1
+
+# Rule : Global Int array const Index
+pattern:
+  ld hl,$1
+  add hl,hl
+  push hl
+  ld hl,$2
+  pop de
+  add hl,de
+constraints:
+  ($1 isnumeric) (($2 isnumeric) ($2 "_" startswith) or) and
+replacement:
+  ld hl, $2+$eval($1 2 *)
+
+
+# Rule : Global Char array 0 Index
+pattern:
+  ld hl,0
+  push hl
+  ld hl,$1
+  pop de
+  add hl,de
+replacement:
+  ld hl,$1
+
+# Rule : Global Char array const Index
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+  add hl,de
+constraints:
+  ($1 isnumeric) (($2 isnumeric) ($2 "_" startswith) or) and
+replacement:
+  ld hl, $2+$1
+
+# Rule : Global Char array variable Index
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+  add hl,de
+replacement:
+  ld de,$1
+  ld hl,$2
+  add hl,de
+
+# Rule : Global Char array complex Index
+pattern:
+  push hl
+  ld hl,$1
+  pop de
+  add hl,de
+replacement:
+  ld de,$1
+  add hl,de
