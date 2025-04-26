@@ -36,94 +36,100 @@ Rule* parse_rules(const char* filename) {
 
     enum { STATE_START, STATE_IN_PATTERN, STATE_IN_REPLACEMENT, STATE_IN_CONSTRAINT } state = STATE_START;
 
-    int pattern_capacity = 0;
-    int replacement_capacity = 0;
-
     char** pattern_lines = NULL;
     int pattern_linecount = 0;
     char** replacement_lines = NULL;
     int replacement_linecount = 0;
     char* constraint = NULL;
-    rule_count = 0;
+    rule_count = 0;    
     while (read_line(fp, line, MAX_LINE_LENGTH) >= 0) {
         char* trimmed = trim(line);
         if (trimmed[0] == '\0' || trimmed[0] == '#') continue;
-
-        if (strncmp(trimmed, "pattern:", 8) == 0) {
-            if (rule_count >= capacity) {
-                capacity *= 2;
-                rules = realloc(rules, capacity * sizeof(Rule));
-                if (rules == NULL) {
-                    printf("Out of memory\n");
-                    return NULL;
-                }
-            }
-
-            if (rule_count) {
-                Rule* rule = &rules[rule_count - 1];
-                rule->pattern_lines = pattern_lines;
-                rule->pattern_linecount = pattern_linecount;
-                rule->replacement_lines = replacement_lines;
-                rule->replacement_linecount = replacement_linecount;
-                rule->constraint = constraint;
-
-                pattern_lines = NULL; pattern_linecount = 0; pattern_capacity = 0;
-                replacement_lines = NULL; replacement_linecount = 0; replacement_capacity = 0;
-                constraint = NULL;
-            }
-
-            ++rule_count;
-            state = STATE_IN_PATTERN;
-            continue;
-        }
-        else if (strncmp(trimmed, "replacement:", 12) == 0) {
-            state = STATE_IN_REPLACEMENT;
-            continue;
-        }
-        else if (strncmp(trimmed, "constraints:", 12) == 0) {
-            state = STATE_IN_CONSTRAINT;
-            continue;
-        }
-
+restart:
         switch (state) {
+            case STATE_START:
+                if (strncmp(trimmed, "pattern:", 8) != 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT);
+                state = STATE_IN_PATTERN;  
+                
+                if (rule_count >= capacity) {
+                    capacity *= 2;
+                    rules = realloc(rules, capacity * sizeof(Rule));
+                    if (rules == NULL) {
+                        printf("Out of memory\n");
+                        return NULL;
+                    }
+                }
+                break;
+
             case STATE_IN_PATTERN:
-                if (pattern_linecount >= pattern_capacity) {
-                    pattern_capacity = (pattern_capacity == 0) ? 4 : pattern_capacity * 2;
-                    pattern_lines = realloc(pattern_lines, pattern_capacity * sizeof(char*));
-                    if (pattern_lines == NULL) {
-                        printf("Out of memory\n");
-                        return NULL;
-                    }
+                if (strncmp(trimmed, "replacement:", 12) == 0)
+                    state = STATE_IN_REPLACEMENT;
+                else if (strncmp(trimmed, "constraints:", 12) == 0)
+                    state = STATE_IN_CONSTRAINT;
+
+                if (state == STATE_IN_PATTERN) {
+                    if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES);
+                    strcpy(window[pattern_linecount++], line);
                 }
-                pattern_lines[pattern_linecount++] = hash(line);
-                break;
-            case STATE_IN_REPLACEMENT:
-                if (replacement_linecount >= replacement_capacity) {
-                    replacement_capacity = (replacement_capacity == 0) ? 4 : replacement_capacity * 2;
-                    replacement_lines = realloc(replacement_lines, replacement_capacity * sizeof(char*));
-                    if (replacement_lines == NULL) {
-                        printf("Out of memory\n");
-                        return NULL;
-                    }
+                else {
+                    pattern_lines = malloc(pattern_linecount * sizeof(char*));
+                    if (pattern_lines == NULL) error(ERROR_OUT_OF_MEMORY);
+                    for (int i = 0; i < pattern_linecount; ++i)
+                        pattern_lines[i] = hash(window[i]);
                 }
-                replacement_lines[replacement_linecount++] = hash(line);
                 break;
+
             case STATE_IN_CONSTRAINT:
-                if (constraint != NULL && strlen(trim(line)) != 0) {
-                    printf("multi-line constraint not supported\n");
-                    return NULL;
+                if (strncmp(trimmed, "replacement:", 12) == 0)
+                    state = STATE_IN_REPLACEMENT;
+                else {
+                    if (constraint != NULL && strlen(trim(line)) != 0) error(ERROR_MULTILINE_CONSTRAINT);
+                    constraint = hash(trimmed);
                 }
-                constraint = hash(trimmed);
+                break;
+
+            case STATE_IN_REPLACEMENT:
+                if (strncmp(trimmed, "pattern:", 8) == 0)
+                    state = STATE_START;
+
+                if (state == STATE_IN_REPLACEMENT) {
+                    if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES);
+                    strcpy(window[replacement_linecount++], line);
+                }
+                else {
+                    replacement_lines = malloc(replacement_linecount * sizeof(char*));
+                    if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY);
+                    for (int i = 0; i < replacement_linecount; ++i)
+                        replacement_lines[i] = hash(window[i]);
+
+                    Rule* rule = &rules[rule_count++];
+                    rule->pattern_lines = pattern_lines;
+                    rule->pattern_linecount = pattern_linecount;
+                    rule->replacement_lines = replacement_lines;
+                    rule->replacement_linecount = replacement_linecount;
+                    rule->constraint = constraint;
+
+                    pattern_lines = NULL; pattern_linecount = 0;
+                    replacement_lines = NULL; replacement_linecount = 0;
+                    constraint = NULL;
+                    
+                    goto restart;
+                }
                 break;
         }
     }
+
     if (rule_count) {
-        Rule* rule = &rules[rule_count - 1];
+        Rule* rule = &rules[rule_count];
         rule->pattern_lines = pattern_lines;
         rule->pattern_linecount = pattern_linecount;
         rule->replacement_lines = replacement_lines;
         rule->replacement_linecount = replacement_linecount;
         rule->constraint = constraint;
+
+        pattern_lines = NULL; pattern_linecount = 0;
+        replacement_lines = NULL; replacement_linecount = 0;
+        constraint = NULL;
     }
 
     return rules;
@@ -446,7 +452,7 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
                         return 0;
                 }
                 else {
-                    bindings[var_index] = hash(l);// _strdup(l);
+                    bindings[var_index] = hash(l);
                 }
                 l += strlen(l);
             }
@@ -463,7 +469,7 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
                         return 0;
                 }
                 else {
-                    bindings[var_index] = hash(tmp_line2);//_strdup(var_val);
+                    bindings[var_index] = hash(tmp_line2);
                 }
                 l = pos;
                 if (strncmp(l, tmp_line1, lit_len) != 0)
@@ -484,7 +490,7 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
 }
 
 
-int match_rule(Rule* rule, char** window, int window_size, char* bindings[10]) {
+int match_rule(Rule* rule, int window_size, char* bindings[10]) {
     for (int i = 0; i < rule->pattern_linecount; ++i) {
         if (i >= window_size)
             return 0;
@@ -544,30 +550,25 @@ static void substitute_line(const char* templ, char* bindings[10], char* result)
     }
 }
 
-void apply_replacement(Rule* rule, char** window, char** bindings) {
+void apply_replacement(Rule* rule, char** bindings) {
 #ifdef __ZXNEXT
     zx_border(1);
 #endif
-    char** lines = window;
-
     for (int i = 0; i < rule->replacement_linecount; i++) {
         const char* line = rule->replacement_lines[i];
         const char* line_body = line;
-        substitute_line(line_body, bindings, &tmp_line1[0]);
-        //write_line(out_fd, tmp_line, strlen(tmp_line));
-        //free(lines[i]);
-        lines[i] = hash(tmp_line1);//_strdup(tmp_line);
+        substitute_line(line_body, bindings, &tmp_line1[0]);        
+        strcpy(window[i], tmp_line1);
     }
 }
 
 void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
-    char** window = malloc(max_window_size * sizeof(char*));
     int window_size = 0;
 
     while (window_size < max_window_size) {
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
         if (n < 0) break;
-        window[window_size++] = hash(line);// _strdup(line);
+        strcpy(window[window_size++], line);
     }
 
     char* bindings[10];
@@ -582,52 +583,46 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
             memset(bindings, 0, sizeof(bindings));
 
             if (rule->pattern_linecount > window_size) continue;
-            int matched_line_count = match_rule(rule, window, window_size, bindings);
+            int matched_line_count = match_rule(rule, window_size, bindings);
             if (matched_line_count) {
                 uint8_t constraints_ok = 1;
                 if (rule->constraint) {
                     constraints_ok = eval_expression(rule->constraint, bindings);
                 }
                 if (constraints_ok) {
-                    apply_replacement(rule, window, bindings);
+                    apply_replacement(rule, bindings);
 
                     // Count lines of the pattern that were not replaced
                     int count = rule->pattern_linecount - rule->replacement_linecount;
 
-                    // free the lines not replaced
-                    //for (int i = 0; i < count; ++i)
-                    //    free(window[rule->replacement_linecount + i]);
-
                     // scroll the window
                     window_size -= count;
                     for (int i = rule->replacement_linecount; i < window_size; ++i) {
-                        window[i] = window[count + i];
+                        strcpy(window[i], window[count + i]);
                     }
 
                     // fill window
                     while (window_size < max_window_size) {
                         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
                         if (n < 0) break;
-                        window[window_size++] = hash(line);//_strdup(line);
+                        strcpy(window[window_size++], line);
                     }
                     for (int i = window_size; i < max_window_size; ++i) {
-                        window[i] = NULL;
+                        window[i][0] = '\0';
                     }                                       
                 }
             }
         }
 
         write_line(out_fd, window[0], strlen(window[0]));
-        //free(window[0]);
         for (int i = 1; i < window_size; ++i) {
-            window[i - 1] = window[i];
+            strcpy(window[i - 1], window[i]);
         }
         --window_size;
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
         if (n >= 0)
-            window[window_size++] = hash(line);//_strdup(line);        
-    }
-    free(window);
+            strcpy(window[window_size++], line);
+    }    
 }
 
 uint8_t old_speed;

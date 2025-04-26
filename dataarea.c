@@ -15,12 +15,17 @@ const char* errmsg[] = {
     "Invalid rule",
     "Invalid expression",
     "Invalid binding",
+    "Expected pattern",
+    "Expected replacement/constraint",
+    "Too many lines",
+    "Multi-line constraint not supported",
 };
 
 char line[MAX_LINE_LENGTH];
-char tmp_line1[MAX_LINE_LENGTH*2];
+char tmp_line1[MAX_LINE_LENGTH * 2];
 char tmp_line2[MAX_LINE_LENGTH];
 char output_filename[MAX_LINE_LENGTH];
+char window[MAX_WINDOW_SIZE][MAX_LINE_LENGTH];
 
 typedef struct HNode {
     char* str;

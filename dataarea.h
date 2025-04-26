@@ -2,6 +2,7 @@
 #define DATAAREA_H_
 
 #define MAX_LINE_LENGTH 80
+#define MAX_WINDOW_SIZE 15
 
 typedef enum ErrorType {
     ERROR_NONE,
@@ -10,12 +11,17 @@ typedef enum ErrorType {
     ERROR_INVALID_RULE,
     ERROR_INVALID_EXPRESSION,
     ERROR_INVALID_BINDING,
+    ERROR_EXPECTED_PATTERN,
+    ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT,
+    ERROR_TOO_MANY_LINES,
+    ERROR_MULTILINE_CONSTRAINT,
 } ErrorType;
 
-extern char line[MAX_LINE_LENGTH];
-extern char tmp_line1[MAX_LINE_LENGTH*2];
-extern char tmp_line2[MAX_LINE_LENGTH];
-extern char output_filename[MAX_LINE_LENGTH];
+extern char line[];
+extern char tmp_line1[];
+extern char tmp_line2[];
+extern char output_filename[];
+extern char window[][MAX_LINE_LENGTH];
 
 char* trim(char* s);
 char* hash(const char* s);
