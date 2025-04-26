@@ -45,78 +45,77 @@ Rule* parse_rules(const char* filename) {
     while (read_line(fp, line, MAX_LINE_LENGTH) >= 0) {
         char* trimmed = trim(line);
         if (trimmed[0] == '\0' || trimmed[0] == '#') continue;
-restart:
-        switch (state) {
-            case STATE_START:
-                if (strncmp(trimmed, "pattern:", 8) != 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT);
-                state = STATE_IN_PATTERN;  
-                
-                if (rule_count >= capacity) {
-                    capacity *= 2;
-                    rules = realloc(rules, capacity * sizeof(Rule));
-                    if (rules == NULL) {
-                        printf("Out of memory\n");
-                        return NULL;
-                    }
-                }
-                break;
-
-            case STATE_IN_PATTERN:
-                if (strncmp(trimmed, "replacement:", 12) == 0)
-                    state = STATE_IN_REPLACEMENT;
-                else if (strncmp(trimmed, "constraints:", 12) == 0)
-                    state = STATE_IN_CONSTRAINT;
-
-                if (state == STATE_IN_PATTERN) {
-                    if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES);
-                    strcpy(window[pattern_linecount++], line);
-                }
-                else {
-                    pattern_lines = malloc(pattern_linecount * sizeof(char*));
-                    if (pattern_lines == NULL) error(ERROR_OUT_OF_MEMORY);
-                    for (int i = 0; i < pattern_linecount; ++i)
-                        pattern_lines[i] = hash(window[i]);
-                }
-                break;
-
-            case STATE_IN_CONSTRAINT:
-                if (strncmp(trimmed, "replacement:", 12) == 0)
-                    state = STATE_IN_REPLACEMENT;
-                else {
-                    if (constraint != NULL && strlen(trim(line)) != 0) error(ERROR_MULTILINE_CONSTRAINT);
-                    constraint = hash(trimmed);
-                }
-                break;
-
-            case STATE_IN_REPLACEMENT:
-                if (strncmp(trimmed, "pattern:", 8) == 0)
-                    state = STATE_START;
-
-                if (state == STATE_IN_REPLACEMENT) {
-                    if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES);
-                    strcpy(window[replacement_linecount++], line);
-                }
-                else {
-                    replacement_lines = malloc(replacement_linecount * sizeof(char*));
-                    if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY);
-                    for (int i = 0; i < replacement_linecount; ++i)
-                        replacement_lines[i] = hash(window[i]);
-
-                    Rule* rule = &rules[rule_count++];
-                    rule->pattern_lines = pattern_lines;
-                    rule->pattern_linecount = pattern_linecount;
-                    rule->replacement_lines = replacement_lines;
-                    rule->replacement_linecount = replacement_linecount;
-                    rule->constraint = constraint;
-
-                    pattern_lines = NULL; pattern_linecount = 0;
-                    replacement_lines = NULL; replacement_linecount = 0;
-                    constraint = NULL;
+        do {
+            switch (state) {
+                case STATE_START:
+                    if (strncmp(trimmed, "pattern:", 8) != 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT);
+                    state = STATE_IN_PATTERN;  
                     
-                    goto restart;
-                }
-                break;
-        }
+                    if (rule_count >= capacity) {
+                        capacity *= 2;
+                        rules = realloc(rules, capacity * sizeof(Rule));
+                        if (rules == NULL) {
+                            printf("Out of memory\n");
+                            return NULL;
+                        }
+                    }
+                    break;
+
+                case STATE_IN_PATTERN:
+                    if (strncmp(trimmed, "replacement:", 12) == 0)
+                        state = STATE_IN_REPLACEMENT;
+                    else if (strncmp(trimmed, "constraints:", 12) == 0)
+                        state = STATE_IN_CONSTRAINT;
+
+                    if (state == STATE_IN_PATTERN) {
+                        if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES);
+                        strcpy(window[pattern_linecount++], line);
+                    }
+                    else {
+                        pattern_lines = malloc(pattern_linecount * sizeof(char*));
+                        if (pattern_lines == NULL) error(ERROR_OUT_OF_MEMORY);
+                        for (int i = 0; i < pattern_linecount; ++i)
+                            pattern_lines[i] = hash(window[i]);
+                    }
+                    break;
+
+                case STATE_IN_CONSTRAINT:
+                    if (strncmp(trimmed, "replacement:", 12) == 0)
+                        state = STATE_IN_REPLACEMENT;
+                    else {
+                        if (constraint != NULL && strlen(trim(line)) != 0) error(ERROR_MULTILINE_CONSTRAINT);
+                        constraint = hash(trimmed);
+                    }
+                    break;
+
+                case STATE_IN_REPLACEMENT:
+                    if (strncmp(trimmed, "pattern:", 8) == 0)
+                        state = STATE_START;
+
+                    if (state == STATE_IN_REPLACEMENT) {
+                        if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES);
+                        strcpy(window[replacement_linecount++], line);
+                    }
+                    else {
+                        replacement_lines = malloc(replacement_linecount * sizeof(char*));
+                        if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY);
+                        for (int i = 0; i < replacement_linecount; ++i)
+                            replacement_lines[i] = hash(window[i]);
+
+                        Rule* rule = &rules[rule_count++];
+                        rule->pattern_lines = pattern_lines;
+                        rule->pattern_linecount = pattern_linecount;
+                        rule->replacement_lines = replacement_lines;
+                        rule->replacement_linecount = replacement_linecount;
+                        rule->constraint = constraint;
+
+                        pattern_lines = NULL; pattern_linecount = 0;
+                        replacement_lines = NULL; replacement_linecount = 0;
+                        constraint = NULL;        
+                    }
+                    break;
+            }
+        } while(state == STATE_START);
     }
 
     if (rule_count) {
@@ -297,6 +296,17 @@ void eval_binop(TokenType op) {
     if (top < 2) error(ERROR_INVALID_EXPRESSION);
     Value y = stack[--top];
     Value x = stack[--top];
+
+    char str[10];
+    if (x.vt == vtInt && y.vt == vtString) {
+        x.vt = vtString;
+        x.strval = hash(itoa(x.intval, str, 10));
+    }
+    else if (x.vt == vtString && y.vt == vtInt) {
+        y.vt = vtString;
+        y.strval = hash(itoa(y.intval, str, 10));
+    }
+
     if (x.vt == vtInt && y.vt == vtInt) {
         switch (op) {
             case tokPlus: x.intval = x.intval + y.intval; break;
@@ -327,8 +337,8 @@ void eval_binop(TokenType op) {
         }
         x.vt = vtInt;
     }
-    else {
-        error(ERROR_INVALID_EXPRESSION);
+    else {        
+        error(ERROR_INVALID_EXPRESSION);        
     }
     stack[top++] = x;
 }

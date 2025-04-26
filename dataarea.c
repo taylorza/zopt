@@ -88,9 +88,6 @@ void free_strtbl(void) {
         }
         strtbl[i] = NULL;
     }
-    if (size > 0) {
-        printf("Freed %d bytes\n", size);
-    }
 }
 
 void error(ErrorType e) {
