@@ -5,6 +5,13 @@ $1
 replacement:
 $1
 
+# Rule: Eliminate register reload
+pattern:
+  ld $1,$2
+  ld $2,$1
+replacement:
+  ld $1,$2
+
 # Rule: Optimize increment byte by 1
 pattern:
   call ccsxt
@@ -171,13 +178,6 @@ replacement:
   ld e,$2
   ld hl,$3
 
-# Rule: Optimize char literal or int variable into char
-pattern:
-  ld hl,$1
-  ld a,l
-replacement:
-  ld a,$1
-
 # Rule: Optimize char variable load
 pattern:
   ld a,$1
@@ -185,15 +185,6 @@ pattern:
   ld a,l
 replacement:
   ld a,$1
-
-# Rule: Optimize char variable load from local
-pattern:
-  ld h,$1
-  ld l,$2
-  ld a,l
-replacement:
-  ld a,$2
-
 
 # Rule : Global Int array 0 Index
 pattern:
@@ -319,3 +310,266 @@ replacement:
   ld bc,$1
   ld a,$2
   out (c),a
+
+# Rule : Optimize nextreg *,*
+pattern:
+  ld de,$1
+  ld hl,$2
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+constraints:
+  ($1 isnumeric) ($2 isnumeric) and
+replacement:
+  nreg $1,$2
+
+# Rule : Optimize nextreg *,a
+pattern:
+  ld de,$1
+  ld hl,$2
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld a,$2
+  nreg $1,a
+
+# Rule : Optimize nextreg *,a
+pattern:
+  ld de,$1
+  ld hl,$2
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$2
+  out(c),a
+
+# Rule : Optimize nextreg *,a
+pattern:
+  ld hl,$1
+  push hl
+  ld a,$2
+  call ccsxt
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld a,$2
+  nreg $1,a
+
+# Rule : Optimize nextreg
+pattern:
+  ld a,$1
+  push hl
+  ld a,$2
+  call ccsxt
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$2
+  out(c),a
+
+# Rule : Optimize nextreg
+pattern:
+  ld a,$1
+  call ccsxt
+  push hl
+  ld a,$2
+  call ccsxt
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$2
+  out(c),a
+
+# Rule : Optimize nextreg
+pattern:
+  ld a,$1
+  call ccsxt
+  push hl
+  ld hl,$2
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$2
+  out(c),a
+
+# Rule : Optimize nextreg
+pattern:
+  ld hl,$1
+  push hl
+  ld a,$2
+  call ccsxt
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$2
+  out(c),a
+
+# Rule : Optimize nextreg (locals)
+pattern:
+  ld hl,$1
+  push hl
+  ld h,$2
+  ld l,$3
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$3
+  out(c),a
+
+# Rule : Optimize nextreg (locals)
+pattern:
+  ld d,$1
+  ld e,$2
+  ld hl,$3
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$2
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$3
+  out(c),a
+
+# Rule : Optimize nextreg (locals)
+pattern:
+  ld d,$1
+  ld e,$2
+  ld h,$3
+  ld l,$4
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$2
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$4
+  out(c),a
+
+# Rule : Optimize nextreg (locals+global)
+pattern:
+  ld a,$1
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$2
+  out(c),a
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld a,$2
+  nreg $1,a
+
+pattern:
+  ld h,$1
+  ld l,$2
+  push hl
+  ld hl,$3
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$2
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$3
+  out(c),a
+
+# Rule : Optimize nextreg (locals+global)
+pattern:
+  ld h,$1
+  ld l,$2
+  push hl
+  ld a,$3
+  call ccsxt
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$2
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$3
+  out(c),a
+
+# Rule : Optimize nextreg (locals+global)
+pattern:
+  ld a,$1
+  call ccsxt
+  push hl
+  ld h,$2
+  ld l,$3
+  pop de
+  ld bc,9275
+  out (c),e
+  inc b
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,9275
+  out (c),a
+  inc b
+  ld a,$3
+  out(c),a

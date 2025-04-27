@@ -41,7 +41,7 @@ Rule* parse_rules(const char* filename) {
     char** replacement_lines = NULL;
     int replacement_linecount = 0;
     char* constraint = NULL;
-    rule_count = 0;    
+    rule_count = 0;
     while (read_line(fp, line, MAX_LINE_LENGTH) >= 0) {
         char* trimmed = trim(line);
         if (trimmed[0] == '\0' || trimmed[0] == '#') continue;
@@ -49,8 +49,8 @@ Rule* parse_rules(const char* filename) {
             switch (state) {
                 case STATE_START:
                     if (strncmp(trimmed, "pattern:", 8) != 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT);
-                    state = STATE_IN_PATTERN;  
-                    
+                    state = STATE_IN_PATTERN;
+
                     if (rule_count >= capacity) {
                         capacity *= 2;
                         rules = realloc(rules, capacity * sizeof(Rule));
@@ -111,15 +111,20 @@ Rule* parse_rules(const char* filename) {
 
                         pattern_lines = NULL; pattern_linecount = 0;
                         replacement_lines = NULL; replacement_linecount = 0;
-                        constraint = NULL;        
+                        constraint = NULL;
                     }
                     break;
             }
-        } while(state == STATE_START);
+        } while (state == STATE_START);
     }
 
     if (rule_count) {
-        Rule* rule = &rules[rule_count];
+        replacement_lines = malloc(replacement_linecount * sizeof(char*));
+        if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY);
+        for (int i = 0; i < replacement_linecount; ++i)
+            replacement_lines[i] = hash(window[i]); 
+
+        Rule* rule = &rules[rule_count++];
         rule->pattern_lines = pattern_lines;
         rule->pattern_linecount = pattern_linecount;
         rule->replacement_lines = replacement_lines;
@@ -337,8 +342,8 @@ void eval_binop(TokenType op) {
         }
         x.vt = vtInt;
     }
-    else {        
-        error(ERROR_INVALID_EXPRESSION);        
+    else {
+        error(ERROR_INVALID_EXPRESSION);
     }
     stack[top++] = x;
 }
@@ -567,7 +572,7 @@ void apply_replacement(Rule* rule, char** bindings) {
     for (int i = 0; i < rule->replacement_linecount; i++) {
         const char* line = rule->replacement_lines[i];
         const char* line_body = line;
-        substitute_line(line_body, bindings, &tmp_line1[0]);        
+        substitute_line(line_body, bindings, &tmp_line1[0]);
         strcpy(window[i], tmp_line1);
     }
 }
@@ -619,7 +624,8 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
                     }
                     for (int i = window_size; i < max_window_size; ++i) {
                         window[i][0] = '\0';
-                    }                                       
+                    }
+                    r = -1;
                 }
             }
         }
@@ -632,7 +638,7 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
         if (n >= 0)
             strcpy(window[window_size++], line);
-    }    
+    }
 }
 
 uint8_t old_speed;

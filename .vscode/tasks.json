@@ -38,7 +38,7 @@
         {
             "label": "Update Rules",
             "type": "shell",            
-            "command": "${workspaceFolder}/../../emulator/hdfmonkey put ${workspaceFolder}/../../sdcard/tbblue-dev.sd rules/rules.opt /",            
+            "command": "${workspaceFolder}/../../emulator/hdfmonkey put ${workspaceFolder}/../../sdcard/tbblue-dev.sd rules/rules.opt /ZDEV/",            
             "dependsOrder": "sequence",
             "dependsOn": [            
             ],
