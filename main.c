@@ -14,6 +14,7 @@ int rule_count;
 uint8_t paren_depth;
 
 typedef struct Rule {
+    int lineno;
     char** pattern_lines;
     int pattern_linecount;
     char** replacement_lines;
@@ -30,12 +31,14 @@ Rule* parse_rules(const char* filename) {
     int capacity = 5;
     Rule* rules = malloc(capacity * sizeof(Rule));
     if (rules == NULL) {
-        error(ERROR_OUT_OF_MEMORY);
+        error(ERROR_OUT_OF_MEMORY, 0);
         return NULL;
     }
 
     enum { STATE_START, STATE_IN_PATTERN, STATE_IN_REPLACEMENT, STATE_IN_CONSTRAINT } state = STATE_START;
 
+    int current_lineno = 0;
+    int rule_lineno = 0;
     char** pattern_lines = NULL;
     int pattern_linecount = 0;
     char** replacement_lines = NULL;
@@ -43,13 +46,15 @@ Rule* parse_rules(const char* filename) {
     char* constraint = NULL;
     rule_count = 0;
     while (read_line(fp, line, MAX_LINE_LENGTH) >= 0) {
+        ++current_lineno;
         char* trimmed = trim(line);
         if (trimmed[0] == '\0' || trimmed[0] == '#') continue;
         do {
             switch (state) {
                 case STATE_START:
-                    if (strncmp(trimmed, "pattern:", 8) != 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT);
+                    if (strncmp(trimmed, "pattern:", 8) != 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT, current_lineno);
                     state = STATE_IN_PATTERN;
+                    rule_lineno = current_lineno;
 
                     if (rule_count >= capacity) {
                         capacity *= 2;
@@ -68,12 +73,12 @@ Rule* parse_rules(const char* filename) {
                         state = STATE_IN_CONSTRAINT;
 
                     if (state == STATE_IN_PATTERN) {
-                        if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES);
+                        if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES, current_lineno);
                         strcpy(window[pattern_linecount++], line);
                     }
                     else {
                         pattern_lines = malloc(pattern_linecount * sizeof(char*));
-                        if (pattern_lines == NULL) error(ERROR_OUT_OF_MEMORY);
+                        if (pattern_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
                         for (int i = 0; i < pattern_linecount; ++i)
                             pattern_lines[i] = hash(window[i]);
                     }
@@ -83,7 +88,7 @@ Rule* parse_rules(const char* filename) {
                     if (strncmp(trimmed, "replacement:", 12) == 0)
                         state = STATE_IN_REPLACEMENT;
                     else {
-                        if (constraint != NULL && strlen(trim(line)) != 0) error(ERROR_MULTILINE_CONSTRAINT);
+                        if (constraint != NULL && strlen(trim(line)) != 0) error(ERROR_MULTILINE_CONSTRAINT, current_lineno);
                         constraint = hash(trimmed);
                     }
                     break;
@@ -93,16 +98,17 @@ Rule* parse_rules(const char* filename) {
                         state = STATE_START;
 
                     if (state == STATE_IN_REPLACEMENT) {
-                        if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES);
+                        if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES, current_lineno);
                         strcpy(window[replacement_linecount++], line);
                     }
                     else {
                         replacement_lines = malloc(replacement_linecount * sizeof(char*));
-                        if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY);
+                        if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
                         for (int i = 0; i < replacement_linecount; ++i)
                             replacement_lines[i] = hash(window[i]);
 
                         Rule* rule = &rules[rule_count++];
+                        rule->lineno = rule_lineno;
                         rule->pattern_lines = pattern_lines;
                         rule->pattern_linecount = pattern_linecount;
                         rule->replacement_lines = replacement_lines;
@@ -120,11 +126,12 @@ Rule* parse_rules(const char* filename) {
 
     if (rule_count) {
         replacement_lines = malloc(replacement_linecount * sizeof(char*));
-        if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY);
+        if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
         for (int i = 0; i < replacement_linecount; ++i)
             replacement_lines[i] = hash(window[i]); 
 
         Rule* rule = &rules[rule_count++];
+        rule->lineno = rule_lineno;
         rule->pattern_lines = pattern_lines;
         rule->pattern_linecount = pattern_linecount;
         rule->replacement_lines = replacement_lines;
@@ -178,13 +185,15 @@ typedef enum {
 // Global array to hold the current token string.
 char token[64];
 TokenType tok;
+int token_lineno;
 
 // Global pointer that tracks our current position in the input string.
 static const char* tokptr = NULL;
 
-void init_tokenizer(const char* str) {
+void init_tokenizer(const char* str, int lineno) {
     tokptr = str;
     paren_depth = 0;
+    token_lineno = lineno;
 }
 
 TokenType get_token(void) {
@@ -247,7 +256,7 @@ TokenType get_token(void) {
             while (*tokptr && *tokptr != terminator) {
                 *temp++ = *tokptr++;
             }
-            if (*tokptr != terminator) error(ERROR_INVALID_EXPRESSION);
+            if (*tokptr != terminator) error(ERROR_INVALID_EXPRESSION, token_lineno);
             tokptr++; // skip closing quote
             tok = tokLiteral;
         }
@@ -298,7 +307,7 @@ int is_numeric(const char* s) {
 }
 
 void eval_binop(TokenType op) {
-    if (top < 2) error(ERROR_INVALID_EXPRESSION);
+    if (top < 2) error(ERROR_INVALID_EXPRESSION, token_lineno);
     Value y = stack[--top];
     Value x = stack[--top];
 
@@ -343,15 +352,15 @@ void eval_binop(TokenType op) {
         x.vt = vtInt;
     }
     else {
-        error(ERROR_INVALID_EXPRESSION);
+        error(ERROR_INVALID_EXPRESSION, token_lineno);
     }
     stack[top++] = x;
 }
 
-int eval_expression(const char* expr, char* bindings[10]) {
+int eval_expression(const char* expr, char* bindings[10], int lineno) {
     Value v1, v2;
     top = 0;
-    init_tokenizer(expr);
+    init_tokenizer(expr, lineno);
     get_token();
     while (tok != tokEos) {
         switch (tok) {
@@ -366,7 +375,7 @@ int eval_expression(const char* expr, char* bindings[10]) {
             case tokVariable:
             {
                 int id = token[0] - '0';
-                if (id < 0 || id > 9) error(ERROR_INVALID_BINDING);
+                if (id < 0 || id > 9) error(ERROR_INVALID_BINDING, lineno);
                 if (is_numeric(bindings[id])) {
                     v1.vt = vtInt;
                     v1.intval = atoi(bindings[id]);
@@ -436,7 +445,7 @@ int eval_expression(const char* expr, char* bindings[10]) {
         }
     }
 
-    if (top != 1 || stack[0].vt != vtInt) error(ERROR_INVALID_EXPRESSION);
+    if (top != 1 || stack[0].vt != vtInt) error(ERROR_INVALID_EXPRESSION, lineno);
     return stack[0].intval;
 }
 
@@ -516,7 +525,7 @@ int match_rule(Rule* rule, int window_size, char* bindings[10]) {
     return rule->pattern_linecount;
 }
 
-static void substitute_line(const char* templ, char* bindings[10], char* result) {
+static void substitute_line(const char* templ, char* bindings[10], char* result, int lineno) {
     result[0] = '\0';
     const char* p = templ;
     while (*p) {
@@ -537,7 +546,7 @@ static void substitute_line(const char* templ, char* bindings[10], char* result)
                     ++end;
                 }
 
-                if (paren_depth != 0) error(ERROR_INVALID_EXPRESSION);
+                if (paren_depth != 0) error(ERROR_INVALID_EXPRESSION, lineno);
 
                 int expr_len = end - start;
                 char expr[MAX_LINE_LENGTH + 1];
@@ -545,7 +554,7 @@ static void substitute_line(const char* templ, char* bindings[10], char* result)
                     expr_len = MAX_LINE_LENGTH;
                 strncpy(expr, start, expr_len);
                 expr[expr_len] = '\0';
-                int evaluated = eval_expression(expr, bindings);
+                int evaluated = eval_expression(expr, bindings, lineno);
                 char buf[64];
                 sprintf(buf, "%d", evaluated);
                 strcat(result, buf);
@@ -572,7 +581,7 @@ void apply_replacement(Rule* rule, char** bindings) {
     for (int i = 0; i < rule->replacement_linecount; i++) {
         const char* line = rule->replacement_lines[i];
         const char* line_body = line;
-        substitute_line(line_body, bindings, &tmp_line1[0]);
+        substitute_line(line_body, bindings, &tmp_line1[0], rule->lineno);
         strcpy(window[i], tmp_line1);
     }
 }
@@ -602,7 +611,7 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
             if (matched_line_count) {
                 uint8_t constraints_ok = 1;
                 if (rule->constraint) {
-                    constraints_ok = eval_expression(rule->constraint, bindings);
+                    constraints_ok = eval_expression(rule->constraint, bindings, rule->lineno);
                 }
                 if (constraints_ok) {
                     apply_replacement(rule, bindings);

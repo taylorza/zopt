@@ -90,7 +90,12 @@ void free_strtbl(void) {
     }
 }
 
-void error(ErrorType e) {
-    printf("Error: %s\n", errmsg[e]);
+void error(ErrorType e, int lineno) {
+    if (lineno) {
+        printf("Error: line %d: %s\n", lineno, errmsg[e]);
+    }
+    else {
+        printf("Error: %s\n", errmsg[e]);
+    }
     exit(1);
 }

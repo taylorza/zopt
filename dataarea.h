@@ -27,6 +27,6 @@ char* trim(char* s);
 char* hash(const char* s);
 void free_strtbl(void);
 
-void error(ErrorType e);
+void error(ErrorType e, int lineno);
 
 #endif //DATAAREA_H_
