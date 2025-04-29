@@ -289,8 +289,8 @@ replacement:
 # Rule : Optimize out port <= 255
 pattern:
   ld hl,$1
-  ld c,l
   ld b,h
+  ld c,l  
   ld hl,$2
   out (c),l
 constraints:
@@ -302,14 +302,55 @@ replacement:
 # Rule : Optimize out port > 255
 pattern:
   ld hl,$1
-  ld c,l
   ld b,h
+  ld c,l
   ld hl,$2
   out (c),l
 replacement:
   ld bc,$1
   ld a,$2
   out (c),a
+
+# Rule : Optimize out (global)
+pattern:
+  ld hl,$1
+  ld bc,$2
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,$2
+  out (c),a
+
+# Rule : Optimize out (global))
+pattern:
+  ld a,$1
+  call ccsxt
+  ld bc,$2
+  out (c),l
+replacement:
+  ld a,$1
+  ld bc,$2
+  out (c),a
+
+# Rule : Optimize out (local)
+pattern:
+  ld h,$1
+  ld l,$2
+  ld bc,$3
+  out (c),l
+replacement:
+  ld a,$2
+  ld bc,$3
+  out (c),a
+
+# Rule : Optimize out port <= 255
+pattern:
+  ld bc,$1
+  out (c),a
+constraints:
+  ($1 isnumeric) ($1 255 <=) and
+replacement:
+  out ($1),a
 
 # Rule : Optimize nextreg *,*
 pattern:
@@ -573,3 +614,22 @@ replacement:
   inc b
   ld a,$3
   out(c),a
+
+# Rule : Optimize BC load (global)
+pattern:
+  ld hl,$1
+  ld b,h
+  ld c,l  
+replacement:
+  ld bc,$1
+
+# Rule : Optimize BC load (local)
+pattern:
+  ld h,$1
+  ld l,$2
+  ld b,h
+  ld c,l
+replacement:
+  ld b,$1
+  ld c,$2
+  
