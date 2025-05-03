@@ -122,7 +122,7 @@ constraints:
 replacement:
   ld hl,$eval($1 $2 *)
 
-# Rule: Optimize const load
+# Rule: Optimize const load into global
 pattern:
   ld hl,$1
   push hl
@@ -131,6 +131,17 @@ pattern:
 replacement:
   ld de,$1
   ld hl,$2
+
+# Rule: Optimize const load into local
+pattern:
+  ld hl,$1
+  ld $2,h
+  ld $3,l
+constraints:
+  ($1 isnumeric) ($1 '_' startswith) or
+replacement:
+  ld $2,+($1>>8)&255
+  ld $3,+($1&255)
 
 # Rule : Optimize load into DE
 pattern:
@@ -632,4 +643,3 @@ pattern:
 replacement:
   ld b,$1
   ld c,$2
-  
