@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <ctype.h>
 
+#include "platform.h"
 #include "dataarea.h"
 
 #define STR_TBL_SIZE 97
@@ -76,7 +77,7 @@ char* hash(const char* s) {
     return entry->str;
 }
 
-void free_strtbl(void) {
+void free_strtbl(void) MYCC {
     uint16_t size = 0;
     for (int i = 0; i < STR_TBL_SIZE; ++i) {
         HNode* p = strtbl[i];
@@ -90,7 +91,7 @@ void free_strtbl(void) {
     }
 }
 
-void error(ErrorType e, int lineno) {
+void error(ErrorType e, int lineno) MYCC {
     if (lineno) {
         printf("Error: line %d: %s\n", lineno, errmsg[e]);
     }

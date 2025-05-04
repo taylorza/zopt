@@ -6,6 +6,7 @@
 #include <arch/zxn/esxdos.h>
 #include <errno.h>
 
+#include "platform.h"
 #include "fileio.h"
 
 #define MAX_BUFFER_SIZE 16
@@ -22,7 +23,7 @@ typedef struct FileInfo {
 
 FileInfo files[MAX_FILES];
 
-void init_file_io(void) {
+void init_file_io(void) MYCC {
     for(int8_t i=0; i<MAX_FILES; ++i) {
         files[i].handle = 255;
         files[i].r_offset = MAX_BUFFER_SIZE;
@@ -31,14 +32,14 @@ void init_file_io(void) {
     }
 }
 
-int8_t find_free_slot(void) {
+int8_t find_free_slot(void) MYCC {
     for(int8_t i=0; i<MAX_FILES; ++i) {
         if (files[i].handle == 255) return i;
     }
     return -1;
 }
 
-int16_t read_buffer(FileInfo *fi) {
+int16_t read_buffer(FileInfo *fi) MYCC {
     errno = 0;
     fi->r_bytes = esxdos_f_read(fi->handle, fi->readbuf, MAX_BUFFER_SIZE);
     if (errno) return -1;
@@ -47,7 +48,7 @@ int16_t read_buffer(FileInfo *fi) {
     return fi->r_bytes;
 }
 
-int8_t internal_open_file(const char *filename, unsigned char mode) {
+int8_t internal_open_file(const char *filename, unsigned char mode) MYCC {
     errno = 0; 
     int8_t fh = find_free_slot();
     if (fh < 0) return -1;
@@ -59,15 +60,15 @@ int8_t internal_open_file(const char *filename, unsigned char mode) {
     return fh;
 }
 
-int8_t open_file(const char *filename) {
+int8_t open_file(const char *filename) MYCC {
     return internal_open_file(filename, ESXDOS_MODE_R | ESXDOS_MODE_OE);
 }
 
-int8_t create_file(const char *filename) { 
+int8_t create_file(const char *filename) MYCC { 
     return internal_open_file(filename, ESXDOS_MODE_W | ESXDOS_MODE_CT);    
 }
 
-int16_t peek_char(FileInfo* fi) {
+int16_t peek_char(FileInfo* fi) MYCC {
     if (fi->r_offset >= fi->r_bytes) {
         int16_t bytesread = read_buffer(fi);
         if (bytesread <= 0) return -1;
@@ -75,7 +76,7 @@ int16_t peek_char(FileInfo* fi) {
     return fi->readbuf[fi->r_offset];
 }
 
-int16_t read_char(FileInfo* fi) {
+int16_t read_char(FileInfo* fi) MYCC {
     if (fi->r_offset >= fi->r_bytes) {
         int16_t bytesread = read_buffer(fi);
         if (bytesread <= 0) return -1;
@@ -83,7 +84,7 @@ int16_t read_char(FileInfo* fi) {
     return fi->readbuf[fi->r_offset++];
 }
 
-int16_t read_line(int8_t f, char* buf, int16_t size) {
+int16_t read_line(int8_t f, char* buf, int16_t size) MYCC {
     FileInfo* fi = &files[f];
     int16_t count = 0;
     while (count < size) {
@@ -104,7 +105,7 @@ int16_t read_line(int8_t f, char* buf, int16_t size) {
     return count;
 }
 
-int16_t flush_write_buffer(FileInfo *fi) {
+int16_t flush_write_buffer(FileInfo *fi) MYCC {
     errno = 0;
     int16_t byteswritten = esxdos_f_write(fi->handle, fi->writebuf, fi->w_offset);
     if (errno != 0) return -1;
@@ -112,7 +113,7 @@ int16_t flush_write_buffer(FileInfo *fi) {
     return byteswritten;
 }
 
-uint16_t write_byte(FileInfo *fi, uint8_t b) {
+uint16_t write_byte(FileInfo *fi, uint8_t b) MYCC {
     if (fi->w_offset == MAX_BUFFER_SIZE) {
         if (flush_write_buffer(fi) == -1) return -1;
     }
@@ -120,7 +121,7 @@ uint16_t write_byte(FileInfo *fi, uint8_t b) {
     return 1;
 }
 
-int16_t write_line(int8_t f, char *buf, int16_t size) {
+int16_t write_line(int8_t f, char *buf, int16_t size) MYCC {
     FileInfo *fi = &files[f]; 
     int16_t byteswritten = 0;
     int8_t write_count;
@@ -136,7 +137,7 @@ int16_t write_line(int8_t f, char *buf, int16_t size) {
     return byteswritten;
 }
 
-void close_file(int8_t f) {
+void close_file(int8_t f) MYCC {
     FileInfo *fi = &files[f]; 
     flush_write_buffer(fi);
     esxdos_f_close(fi->handle);
@@ -146,11 +147,11 @@ void close_file(int8_t f) {
     fi->r_bytes = 0;
 }
 
-void delete_file(const char* filename) {
+void delete_file(const char* filename) MYCC {
     esx_f_unlink(filename);
 }
 
-void rename_file(const char* origname, const char* newname) {
+void rename_file(const char* origname, const char* newname) MYCC {
     esx_f_rename(origname, newname);
 }
 

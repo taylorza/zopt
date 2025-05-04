@@ -7,6 +7,7 @@
 #include <arch/zxn.h>
 #endif
 
+#include "platform.h"
 #include "dataarea.h"
 #include "fileio.h"
 
@@ -190,7 +191,7 @@ int token_lineno;
 // Global pointer that tracks our current position in the input string.
 static const char* tokptr = NULL;
 
-void init_tokenizer(const char* str, int lineno) {
+void init_tokenizer(const char* str, int lineno) MYCC {
     tokptr = str;
     paren_depth = 0;
     token_lineno = lineno;
@@ -306,7 +307,7 @@ int is_numeric(const char* s) {
     return 1;
 }
 
-void eval_binop(TokenType op) {
+void eval_binop(TokenType op) MYCC {
     if (top < 2) error(ERROR_INVALID_EXPRESSION, token_lineno);
     Value y = stack[--top];
     Value x = stack[--top];
@@ -525,7 +526,7 @@ int match_rule(Rule* rule, int window_size, char* bindings[10]) {
     return rule->pattern_linecount;
 }
 
-static void substitute_line(const char* templ, char* bindings[10], char* result, int lineno) {
+static void substitute_line(const char* templ, char* bindings[10], char* result, int lineno) MYCC {
     result[0] = '\0';
     const char* p = templ;
     while (*p) {
@@ -574,7 +575,7 @@ static void substitute_line(const char* templ, char* bindings[10], char* result,
     }
 }
 
-void apply_replacement(Rule* rule, char** bindings) {
+void apply_replacement(Rule* rule, char** bindings) MYCC {
 #ifdef __ZXNEXT
     zx_border(1);
 #endif
@@ -586,7 +587,7 @@ void apply_replacement(Rule* rule, char** bindings) {
     }
 }
 
-void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
+void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) MYCC {
     int window_size = 0;
 
     while (window_size < max_window_size) {
@@ -653,14 +654,14 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
 uint8_t old_speed;
 uint8_t old_border;
 
-void cleanup(void) {
+void cleanup(void) MYCC {
 #ifdef __ZXNEXT
     ZXN_NEXTREGA(0x07, old_speed);
     zx_border(old_border);
 #endif
 }
 
-void init(void) {
+void init(void) MYCC {
     atexit(cleanup);
     init_file_io();
 #ifdef __ZXNEXT

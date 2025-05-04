@@ -25,8 +25,8 @@ extern char window[][MAX_LINE_LENGTH];
 
 char* trim(char* s);
 char* hash(const char* s);
-void free_strtbl(void);
+void free_strtbl(void) MYCC;
 
-void error(ErrorType e, int lineno);
+void error(ErrorType e, int lineno)MYCC;
 
 #endif //DATAAREA_H_
