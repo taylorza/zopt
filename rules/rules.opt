@@ -5,6 +5,107 @@ $1
 replacement:
 $1
 
+# Rule: Remove redundant exchange
+pattern:
+;#ZOPT
+  push hl
+  pop de
+  ex de,hl
+replacement:
+-
+
+# Rule: Optimize increment int by 1
+pattern:
+  push hl
+  ld hl,1
+  pop de
+  add hl,de
+replacement:
+  inc hl
+
+pattern:
+  ld de,$1
+  ld hl,1
+  add hl,de
+replacement:
+  ld hl,$1
+  inc hl
+
+# Rule: Optimize decrement int by 1
+pattern:
+  push hl
+  ld hl,1
+  pop de
+  ex de,hl
+  xor a
+  sbc hl,de
+replacement:
+  dec hl
+
+pattern:
+  ld de,$1
+  ld hl,1
+  ex de,hl
+  xor a
+  sbc hl,de
+replacement:
+  ld hl,$1
+  dec hl
+
+# Rule : Global array 0 Index
+pattern:
+  ld hl,0
+  push hl
+  ld hl,$1
+  pop de
+  add hl,de
+replacement:
+  ld hl,$1
+
+# Rule : Global array const Index
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+  add hl,de
+constraints:
+  ($1 isnumeric) (($2 isnumeric) ($2 "_" startswith) or) and
+replacement:
+  ld hl,$2+$1
+
+# Rule : Global Char array variable Index
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+  add hl,de
+replacement:
+  ld de,$1
+  ld hl,$2
+  add hl,de
+
+# Rule : Global Char array complex Index
+pattern:
+  push hl
+  ld hl,$1
+  pop de
+  add hl,de
+replacement:
+  ld de,$1
+  add hl,de
+
+# Rule : HL to DE
+pattern:
+  ld h,$1
+  ld l,$2
+  ld d,h
+  ld e,l
+replacement:
+  ld d,$1
+  ld e,$2
+
 # Rule: Eliminate register reload
 pattern:
   ld $1,$2
@@ -64,65 +165,7 @@ replacement:
   ld b,$1
   sub a,b
 
-# Rule: Optimize increment int by 1
-pattern:
-  push hl
-  ld hl,1
-  pop de
-  add hl,de
-replacement:
-  inc hl
-
-# Rule: Optimize decrement int by 1
-pattern:
-  push hl
-  ld hl,1
-  pop de
-  ex de,hl
-  xor a
-  sbc hl,de
-replacement:
-  dec hl
-
-# Rule: Optimize const addition
-pattern:
-  ld hl,$1
-  push hl
-  ld hl,$2
-  pop de
-  add hl,de
-constraints:
-  (($1 isnumeric) ($2 isnumeric) and)
-replacement:
-  ld hl,$eval($1 $2 +)
-
-# Rule: Optimize const subtraction
-pattern:
-  ld hl,$1
-  push hl
-  ld hl,$2
-  pop de
-  ex de,hl
-  xor a
-  add hl,de
-constraints:
-  (($1 isnumeric) ($2 isnumeric) and)
-replacement:
-  ld hl,$eval($1 $2 -)
-
-# Rule: Optimize const multiplication
-pattern:
-  ld hl,$1
-  push hl
-  ld hl,$2
-  pop de
-  call ccmult
-constraints:
-  (($1 isnumeric) ($2 isnumeric) and)
-replacement:
-  ld hl,$eval($1 $2 *)
-
-# Rule: Optimize const load into global
+# Rule: Optimize const load into HL & DE
 pattern:
   ld hl,$1
   push hl
@@ -196,85 +239,6 @@ pattern:
   ld a,l
 replacement:
   ld a,$1
-
-# Rule : Global Int array 0 Index
-pattern:
-  ld hl,0
-  add hl,hl
-  push hl
-  ld hl,$1
-  pop de
-  add hl,de
-replacement:
-  ld hl,$1
-
-# Rule : Global Int array const Index
-pattern:
-  ld hl,$1
-  add hl,hl
-  push hl
-  ld hl,$2
-  pop de
-  add hl,de
-constraints:
-  ($1 isnumeric) (($2 isnumeric) ($2 "_" startswith) or) and
-replacement:
-  ld hl, $2+$eval($1 2 *)
-
-
-# Rule : Global Char array 0 Index
-pattern:
-  ld hl,0
-  push hl
-  ld hl,$1
-  pop de
-  add hl,de
-replacement:
-  ld hl,$1
-
-# Rule : Global Char array const Index
-pattern:
-  ld hl,$1
-  push hl
-  ld hl,$2
-  pop de
-  add hl,de
-constraints:
-  ($1 isnumeric) (($2 isnumeric) ($2 "_" startswith) or) and
-replacement:
-  ld hl, $2+$1
-
-# Rule : Global Char array variable Index
-pattern:
-  ld hl,$1
-  push hl
-  ld hl,$2
-  pop de
-  add hl,de
-replacement:
-  ld de,$1
-  ld hl,$2
-  add hl,de
-
-# Rule : Global Char array complex Index
-pattern:
-  push hl
-  ld hl,$1
-  pop de
-  add hl,de
-replacement:
-  ld de,$1
-  add hl,de
-
-# Rule : HL to DE
-pattern:
-  ld h,$1
-  ld l,$2
-  ld d,h
-  ld e,l
-replacement:
-  ld d,$1
-  ld e,$2
 
 # Rule : L to B (from HL)
 pattern:

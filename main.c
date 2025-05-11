@@ -100,7 +100,11 @@ Rule* parse_rules(const char* filename) {
 
                     if (state == STATE_IN_REPLACEMENT) {
                         if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES, current_lineno);
-                        strcpy(window[replacement_linecount++], line);
+                        if (trimmed[0] == '-') {
+                            strcpy(window[replacement_linecount++], hash(""));                            
+                        } else {
+                            strcpy(window[replacement_linecount++], line);
+                        }
                     }
                     else {
                         replacement_lines = malloc(replacement_linecount * sizeof(char*));
@@ -191,7 +195,7 @@ int token_lineno;
 // Global pointer that tracks our current position in the input string.
 static const char* tokptr = NULL;
 
-void init_tokenizer(const char* str, int lineno) MYCC {
+void init_tokenizer(const char* str, int lineno) {
     tokptr = str;
     paren_depth = 0;
     token_lineno = lineno;
@@ -307,7 +311,7 @@ int is_numeric(const char* s) {
     return 1;
 }
 
-void eval_binop(TokenType op) MYCC {
+void eval_binop(TokenType op) {
     if (top < 2) error(ERROR_INVALID_EXPRESSION, token_lineno);
     Value y = stack[--top];
     Value x = stack[--top];
@@ -526,7 +530,7 @@ int match_rule(Rule* rule, int window_size, char* bindings[10]) {
     return rule->pattern_linecount;
 }
 
-static void substitute_line(const char* templ, char* bindings[10], char* result, int lineno) MYCC {
+static void substitute_line(const char* templ, char* bindings[10], char* result, int lineno) {
     result[0] = '\0';
     const char* p = templ;
     while (*p) {
@@ -575,7 +579,7 @@ static void substitute_line(const char* templ, char* bindings[10], char* result,
     }
 }
 
-void apply_replacement(Rule* rule, char** bindings) MYCC {
+void apply_replacement(Rule* rule, char** bindings) {
 #ifdef __ZXNEXT
     zx_border(1);
 #endif
@@ -587,7 +591,7 @@ void apply_replacement(Rule* rule, char** bindings) MYCC {
     }
 }
 
-void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) MYCC {
+void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
     int window_size = 0;
 
     while (window_size < max_window_size) {
@@ -654,14 +658,14 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) MYC
 uint8_t old_speed;
 uint8_t old_border;
 
-void cleanup(void) MYCC {
+void cleanup(void) {
 #ifdef __ZXNEXT
     ZXN_NEXTREGA(0x07, old_speed);
     zx_border(old_border);
 #endif
 }
 
-void init(void) MYCC {
+void init(void) {
     atexit(cleanup);
     init_file_io();
 #ifdef __ZXNEXT

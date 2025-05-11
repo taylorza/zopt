@@ -77,7 +77,7 @@ char* hash(const char* s) {
     return entry->str;
 }
 
-void free_strtbl(void) MYCC {
+void free_strtbl(void) {
     uint16_t size = 0;
     for (int i = 0; i < STR_TBL_SIZE; ++i) {
         HNode* p = strtbl[i];
