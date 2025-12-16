@@ -84,6 +84,7 @@ void free_strtbl(void) {
         while (p) {
             size += strlen(p->str)+1;
             HNode* n = p->next;
+            free(p->str);
             free(p);
             p = n;
         }
