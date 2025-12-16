@@ -335,15 +335,43 @@ void eval_binop(TokenType op) {
     if (top < 2) error(ERROR_INVALID_EXPRESSION, token_lineno);
     Value y = stack[--top];
     Value x = stack[--top];
-
-    char str[10];
-    if (x.vt == vtInt && y.vt == vtString) {
-        x.vt = vtString;
-        x.strval = hash(itoa(x.intval, str, 10));
-    }
-    else if (x.vt == vtString && y.vt == vtInt) {
-        y.vt = vtString;
-        y.strval = hash(itoa(y.intval, str, 10));
+    if ((x.vt == vtInt && y.vt == vtString) || (x.vt == vtString && y.vt == vtInt)) {
+        switch (op) {
+            case tokLt:
+            case tokGt:
+            case tokLe:
+            case tokGe:
+            case tokEq:
+            case tokNe:
+            {
+                char leftbuf[32];
+                char rightbuf[32];
+                const char *ls, *rs;
+                if (x.vt == vtInt) {
+                    snprintf(leftbuf, sizeof(leftbuf), "%d", x.intval);
+                    ls = leftbuf;
+                    rs = y.strval;
+                } else {
+                    ls = x.strval;
+                    snprintf(rightbuf, sizeof(rightbuf), "%d", y.intval);
+                    rs = rightbuf;
+                }
+                int r = strcmp(ls, rs);
+                switch (op) {
+                    case tokLt: x.intval = r < 0; break;
+                    case tokGt: x.intval = r > 0; break;
+                    case tokLe: x.intval = r <= 0; break;
+                    case tokGe: x.intval = r >= 0; break;
+                    case tokEq: x.intval = r == 0; break;
+                    case tokNe: x.intval = r != 0; break;
+                }
+                x.vt = vtInt;
+                stack[top++] = x;
+                return;
+            }
+            default:
+                error(ERROR_INVALID_EXPRESSION, token_lineno);
+        }
     }
 
     if (x.vt == vtInt && y.vt == vtInt) {
