@@ -278,12 +278,32 @@ TokenType get_token(void) {
                     *temp++ = *tokptr++;
                 }
                 *temp = '\0';
-                if (strcmp(token, "isnumeric") == 0) tok = tokIsNumeric;
-                else if (strcmp(token, "startswith") == 0) tok = tokStartsWith;
-                else if (strcmp(token, "and") == 0) tok = tokAnd;
-                else if (strcmp(token, "or") == 0) tok = tokOr;
-                else if (strcmp(token, "xor") == 0) tok = tokXor;
-                else tok = tokLiteral;
+                /* Reduce repeated strcmp calls by routing based on first char */
+                switch (token[0]) {
+                    case 'i':
+                        if (strcmp(token, "isnumeric") == 0) tok = tokIsNumeric;
+                        else tok = tokLiteral;
+                        break;
+                    case 's':
+                        if (strcmp(token, "startswith") == 0) tok = tokStartsWith;
+                        else tok = tokLiteral;
+                        break;
+                    case 'a':
+                        if (strcmp(token, "and") == 0) tok = tokAnd;
+                        else tok = tokLiteral;
+                        break;
+                    case 'o':
+                        if (strcmp(token, "or") == 0) tok = tokOr;
+                        else tok = tokLiteral;
+                        break;
+                    case 'x':
+                        if (strcmp(token, "xor") == 0) tok = tokXor;
+                        else tok = tokLiteral;
+                        break;
+                    default:
+                        tok = tokLiteral;
+                        break;
+                }
             }
             break;
     }
@@ -531,14 +551,16 @@ int match_rule(Rule* rule, int window_size, char* bindings[10]) {
 }
 
 static void substitute_line(const char* templ, char* bindings[10], char* result, int lineno) {
-    result[0] = '\0';
+    char* out = result;
     const char* p = templ;
     while (*p) {
         if (p[0] == '$') {
-            if (isdigit(p[1])) {
+            if (isdigit((unsigned char)p[1])) {
                 int index = p[1] - '0';
-                if (bindings[index])
-                    strcat(result, bindings[index]);
+                if (bindings[index]) {
+                    const char* s = bindings[index];
+                    while (*s) *out++ = *s++;
+                }
                 p += 2;
             }
             else if (strncmp(p, "$eval(", 6) == 0) {
@@ -562,21 +584,19 @@ static void substitute_line(const char* templ, char* bindings[10], char* result,
                 int evaluated = eval_expression(expr, bindings, lineno);
                 char buf[64];
                 sprintf(buf, "%d", evaluated);
-                strcat(result, buf);
+                const char* s = buf;
+                while (*s) *out++ = *s++;
                 p = end;
             }
             else {
-                strncat(result, p, 1);
-                p++;
+                *out++ = *p++;
             }
         }
         else {
-            int rlen = strlen(result);
-            result[rlen] = *p;
-            result[rlen + 1] = '\0';
-            p++;
+            *out++ = *p++;
         }
     }
+    *out = '\0';
 }
 
 void apply_replacement(Rule* rule, char** bindings) {
@@ -625,9 +645,15 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
                     int count = rule->pattern_linecount - rule->replacement_linecount;
 
                     // scroll the window
-                    window_size -= count;
-                    for (int i = rule->replacement_linecount; i < window_size; ++i) {
-                        strcpy(window[i], window[count + i]);
+                    {
+                        int old_window_size = window_size;
+                        int P = rule->pattern_linecount;
+                        int R = rule->replacement_linecount;
+                        window_size -= count;
+                        int rows_to_move = old_window_size - P; /* rows after the pattern */
+                        if (rows_to_move > 0) {
+                            memmove(&window[R], &window[P], rows_to_move * sizeof(window[0]));
+                        }
                     }
 
                     // fill window
@@ -645,8 +671,8 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
         }
 
         write_line(out_fd, window[0], strlen(window[0]));
-        for (int i = 1; i < window_size; ++i) {
-            strcpy(window[i - 1], window[i]);
+        if (window_size > 1) {
+            memmove(&window[0], &window[1], (window_size - 1) * sizeof(window[0]));
         }
         --window_size;
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
