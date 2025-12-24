@@ -31,6 +31,12 @@ replacement:
   ld hl,$1
   inc hl
 
+pattern:
+  ld de,1
+  add hl,de
+replacement:
+  inc hl
+
 # Rule: Optimize decrement int by 1
 pattern:
   push hl
@@ -50,6 +56,12 @@ pattern:
   sbc hl,de
 replacement:
   ld hl,$1
+  dec hl
+
+pattern:
+  ld de,65535
+  add hl,de
+replacement:
   dec hl
 
 # Rule : Global array 0 Index
