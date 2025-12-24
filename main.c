@@ -129,7 +129,10 @@ Rule* parse_rules(const char* filename) {
         } while (state == STATE_START);
     }
 
-    if (rule_count) {
+    if (pattern_linecount || replacement_linecount) {
+        if (replacement_linecount == 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT, current_lineno);
+        if (pattern_linecount == 0) error(ERROR_EXPECTED_PATTERN, current_lineno);
+        
         replacement_lines = malloc(replacement_linecount * sizeof(char*));
         if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
         for (int i = 0; i < replacement_linecount; ++i)
