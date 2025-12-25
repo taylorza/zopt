@@ -11,7 +11,7 @@
 #include "dataarea.h"
 #include "fileio.h"
 
-uint8_t rule_count;
+int rule_count;
 uint8_t paren_depth;
 
 typedef struct TokenizedExpr TokenizedExpr;
@@ -805,7 +805,7 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size)
 #ifdef __ZXNEXT
         zx_border(0);
 #endif      
-        for (uint8_t r = 0; r < rule_count; ++r) {
+        for (int r = 0; r < rule_count; ++r) {
             Rule* rule = &rules[r];
 
             memset(bindings, 0, sizeof(bindings));
@@ -841,10 +841,10 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size)
                         if (n < 0) break;
                         strcpy(window[window_size++], line);
                     }
-                    for (int i = window_size; i < max_window_size; ++i) {
+                    for (uint8_t i = window_size; i < max_window_size; ++i) {
                         window[i][0] = '\0';
                     }
-                    r = -1;
+                    r = -1; // restart rule matching
                 }
             }
         }
