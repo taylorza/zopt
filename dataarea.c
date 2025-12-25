@@ -7,7 +7,7 @@
 #include "platform.h"
 #include "dataarea.h"
 
-#define STR_TBL_SIZE 97
+#define STR_TBL_SIZE 512
 
 const char* errmsg[] = {
     "OK",
@@ -48,11 +48,11 @@ char* trim(char* s) {
 }
 
 char* hash(const char* s) {
-    int h = 0;
-
+    uint16_t h = 0x811c;
     const char* p = s;
     while (*p) {
-        h += *p++;
+        h ^= *p;
+        h *= *p++;
     }
     h %= STR_TBL_SIZE;
 

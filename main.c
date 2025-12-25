@@ -11,10 +11,13 @@
 #include "dataarea.h"
 #include "fileio.h"
 
-int rule_count;
+uint8_t rule_count;
 uint8_t paren_depth;
 
 typedef struct TokenizedExpr TokenizedExpr;
+
+/* Note: pattern/replacement line counts are always <= MAX_WINDOW_SIZE (<=255)
+   so use uint8_t to save space and help the optimizer. */
 
 /* Forward declarations for compiled-expression API */
 TokenizedExpr* compile_expression(const char* expr, int lineno);
@@ -24,9 +27,9 @@ int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno);
 typedef struct Rule {
     int lineno;
     char** pattern_lines;
-    int pattern_linecount;
+    uint8_t pattern_linecount;
     char** replacement_lines;
-    int replacement_linecount;
+    uint8_t replacement_linecount;
     TokenizedExpr* constraint_expr;
 } Rule; 
 
@@ -48,9 +51,9 @@ Rule* parse_rules(const char* filename) {
     int current_lineno = 0;
     int rule_lineno = 0;
     char** pattern_lines = NULL;
-    int pattern_linecount = 0;
+    uint8_t pattern_linecount = 0;
     char** replacement_lines = NULL;
-    int replacement_linecount = 0;
+    uint8_t replacement_linecount = 0;
     TokenizedExpr* constraint_expr = NULL;
     rule_count = 0;
     while (read_line(fp, line, MAX_LINE_LENGTH) >= 0) {
@@ -87,7 +90,7 @@ Rule* parse_rules(const char* filename) {
                     else {
                         pattern_lines = malloc(pattern_linecount * sizeof(char*));
                         if (pattern_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
-                        for (int i = 0; i < pattern_linecount; ++i)
+                        for (uint8_t i = 0; i < pattern_linecount; ++i)
                             pattern_lines[i] = hash(window[i]);
                     }
                     break;
@@ -116,7 +119,7 @@ Rule* parse_rules(const char* filename) {
                     else {
                         replacement_lines = malloc(replacement_linecount * sizeof(char*));
                         if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
-                        for (int i = 0; i < replacement_linecount; ++i)
+                        for (uint8_t i = 0; i < replacement_linecount; ++i)
                             replacement_lines[i] = hash(window[i]);
 
                         Rule* rule = &rules[rule_count++];
@@ -142,7 +145,7 @@ Rule* parse_rules(const char* filename) {
 
         replacement_lines = malloc(replacement_linecount * sizeof(char*));
         if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
-        for (int i = 0; i < replacement_linecount; ++i)
+        for (uint8_t i = 0; i < replacement_linecount; ++i)
             replacement_lines[i] = hash(window[i]); 
 
         Rule* rule = &rules[rule_count++];
@@ -579,7 +582,7 @@ void free_tokenized_expr(TokenizedExpr* e) {
 int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno) {
     top = 0;
     token_lineno = lineno;
-    for (int i = 0; i < e->count; ++i) {
+    for (uint16_t i = 0; i < e->count; ++i) {
         TokenEntry* te = &e->entries[i];
         switch (te->type) {
             case tokNumber: {
@@ -712,13 +715,19 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
 }
 
 
-int match_rule(Rule* rule, int window_size, char* bindings[10]) {
-    for (int i = 0; i < rule->pattern_linecount; ++i) {
-        if (i >= window_size)
-            return 0;
+uint8_t match_rule(Rule* rule, uint8_t window_size, char* bindings[10]) {
+    uint8_t last_line = (rule->pattern_linecount < window_size ? rule->pattern_linecount : window_size);
+    
+    if (!match_pattern_line(rule->pattern_lines[0], window[0], bindings))
+        return 0;
+    if (last_line == 1) return 1;
 
-        if (!match_pattern_line(rule->pattern_lines[i], window[i], bindings))
-            return 0;
+    if (!match_pattern_line(rule->pattern_lines[last_line-1], window[last_line-1], bindings))
+        return 0;
+    
+    for (uint8_t i = 1; i < last_line-1; ++i) {
+        if (!match_pattern_line(rule->pattern_lines[i], window[i], bindings)) 
+            return 0;    
     }
     return rule->pattern_linecount;
 }
@@ -773,10 +782,7 @@ static void substitute_line(const char* templ, char* bindings[10], char* result,
 }
 
 void apply_replacement(Rule* rule, char** bindings) {
-#ifdef __ZXNEXT
-    zx_border(1);
-#endif
-    for (int i = 0; i < rule->replacement_linecount; i++) {
+    for (uint8_t i = 0; i < rule->replacement_linecount; i++) {
         const char* line = rule->replacement_lines[i];
         const char* line_body = line;
         substitute_line(line_body, bindings, &tmp_line1[0], rule->lineno);
@@ -784,8 +790,8 @@ void apply_replacement(Rule* rule, char** bindings) {
     }
 }
 
-void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
-    int window_size = 0;
+void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size) {
+    uint8_t window_size = 0;
 
     while (window_size < max_window_size) {
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
@@ -799,13 +805,13 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
 #ifdef __ZXNEXT
         zx_border(0);
 #endif      
-        for (int r = 0; r < rule_count; ++r) {
+        for (uint8_t r = 0; r < rule_count; ++r) {
             Rule* rule = &rules[r];
 
             memset(bindings, 0, sizeof(bindings));
 
             if (rule->pattern_linecount > window_size) continue;
-            int matched_line_count = match_rule(rule, window_size, bindings);
+            uint8_t matched_line_count = match_rule(rule, window_size, bindings);
             if (matched_line_count) {
                 uint8_t constraints_ok = 1;
                 if (rule->constraint_expr) {
@@ -815,13 +821,13 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
                     apply_replacement(rule, bindings);
 
                     // Count lines of the pattern that were not replaced
-                    int count = rule->pattern_linecount - rule->replacement_linecount;
+                    int count = (int)rule->pattern_linecount - (int)rule->replacement_linecount;
 
                     // scroll the window
                     {
                         int old_window_size = window_size;
-                        int P = rule->pattern_linecount;
-                        int R = rule->replacement_linecount;
+                        int P = (int)rule->pattern_linecount;
+                        int R = (int)rule->replacement_linecount;
                         window_size -= count;
                         int rows_to_move = old_window_size - P; /* rows after the pattern */
                         if (rows_to_move > 0) {
@@ -901,7 +907,7 @@ int main(int argc, char** argv) {
     Rule* rules = parse_rules(rule_filename);
     if (!rules) return 1;
 
-    int code_window = 0;
+    uint8_t code_window = 0;
     for (int i = 0; i < rule_count; ++i) {
         if (rules[i].pattern_linecount > code_window) code_window = rules[i].pattern_linecount;
     }

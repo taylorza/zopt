@@ -84,7 +84,7 @@ int16_t read_char(FileInfo* fi) MYCC {
 }
 
 int16_t read_line(int8_t f, char* buf, int16_t size) MYCC {
-    zx_border(1);
+    zx_border(5);
     FileInfo* fi = &files[f];
     int16_t count = 0;
     while (count < size) {
@@ -102,6 +102,7 @@ int16_t read_line(int8_t f, char* buf, int16_t size) MYCC {
         ++count;
     }
     *buf = '\0';
+    zx_border(0);
     return count;
 }
 
@@ -122,7 +123,7 @@ uint16_t write_byte(FileInfo *fi, uint8_t b) MYCC {
 }
 
 int16_t write_line(int8_t f, char *buf, int16_t size) MYCC {
-    zx_border(0);
+    zx_border(3);
     FileInfo *fi = &files[f]; 
     int16_t byteswritten = 0;
     int8_t write_count;
@@ -133,7 +134,7 @@ int16_t write_line(int8_t f, char *buf, int16_t size) MYCC {
     }
     write_count = write_byte(fi, '\n');
     if (write_count == -1) return -1;
-        
+    zx_border(0);
     return byteswritten;
 }
 
