@@ -14,14 +14,21 @@
 int rule_count;
 uint8_t paren_depth;
 
+typedef struct TokenizedExpr TokenizedExpr;
+
+/* Forward declarations for compiled-expression API */
+TokenizedExpr* compile_expression(const char* expr, int lineno);
+void free_tokenized_expr(TokenizedExpr* e);
+int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno);
+
 typedef struct Rule {
     int lineno;
     char** pattern_lines;
     int pattern_linecount;
     char** replacement_lines;
     int replacement_linecount;
-    char* constraint;
-} Rule;
+    TokenizedExpr* constraint_expr;
+} Rule; 
 
 Rule* parse_rules(const char* filename) {
     int8_t fp = open_file(filename);
@@ -44,7 +51,7 @@ Rule* parse_rules(const char* filename) {
     int pattern_linecount = 0;
     char** replacement_lines = NULL;
     int replacement_linecount = 0;
-    char* constraint = NULL;
+    TokenizedExpr* constraint_expr = NULL;
     rule_count = 0;
     while (read_line(fp, line, MAX_LINE_LENGTH) >= 0) {
         ++current_lineno;
@@ -89,8 +96,8 @@ Rule* parse_rules(const char* filename) {
                     if (strncmp(trimmed, "replacement:", 12) == 0)
                         state = STATE_IN_REPLACEMENT;
                     else {
-                        if (constraint != NULL && strlen(trim(line)) != 0) error(ERROR_MULTILINE_CONSTRAINT, current_lineno);
-                        constraint = hash(trimmed);
+                        if (constraint_expr != NULL && strlen(trim(line)) != 0) error(ERROR_MULTILINE_CONSTRAINT, current_lineno);
+                        constraint_expr = compile_expression(trimmed, current_lineno);
                     }
                     break;
 
@@ -118,11 +125,11 @@ Rule* parse_rules(const char* filename) {
                         rule->pattern_linecount = pattern_linecount;
                         rule->replacement_lines = replacement_lines;
                         rule->replacement_linecount = replacement_linecount;
-                        rule->constraint = constraint;
+                        rule->constraint_expr = constraint_expr;
 
                         pattern_lines = NULL; pattern_linecount = 0;
                         replacement_lines = NULL; replacement_linecount = 0;
-                        constraint = NULL;
+                        constraint_expr = NULL;
                     }
                     break;
             }
@@ -132,7 +139,7 @@ Rule* parse_rules(const char* filename) {
     if (pattern_linecount || replacement_linecount) {
         if (replacement_linecount == 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT, current_lineno);
         if (pattern_linecount == 0) error(ERROR_EXPECTED_PATTERN, current_lineno);
-        
+
         replacement_lines = malloc(replacement_linecount * sizeof(char*));
         if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
         for (int i = 0; i < replacement_linecount; ++i)
@@ -144,11 +151,11 @@ Rule* parse_rules(const char* filename) {
         rule->pattern_linecount = pattern_linecount;
         rule->replacement_lines = replacement_lines;
         rule->replacement_linecount = replacement_linecount;
-        rule->constraint = constraint;
+        rule->constraint_expr = constraint_expr;
 
         pattern_lines = NULL; pattern_linecount = 0;
         replacement_lines = NULL; replacement_linecount = 0;
-        constraint = NULL;
+        constraint_expr = NULL;
     }
 
     return rules;
@@ -194,6 +201,24 @@ typedef enum {
 char token[64];
 TokenType tok;
 int token_lineno;
+
+// Tokenized expression representation for compiled constraints
+typedef struct {
+    TokenType type;
+    char* strval; /* interned string for literals */
+    int intval;   /* numeric value or variable index */
+} TokenEntry;
+
+typedef struct TokenizedExpr {
+    TokenEntry* entries;
+    int count;
+    int capacity;
+} TokenizedExpr;
+
+/* Compile an expression into a token array for fast repeated evaluation */
+TokenizedExpr* compile_expression(const char* expr, int lineno);
+void free_tokenized_expr(TokenizedExpr* e);
+int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno);
 
 // Global pointer that tracks our current position in the input string.
 static const char* tokptr = NULL;
@@ -505,6 +530,123 @@ int eval_expression(const char* expr, char* bindings[10], int lineno) {
     return stack[0].intval;
 }
 
+/* Compile expression into token entries */
+TokenizedExpr* compile_expression(const char* expr, int lineno) {
+    TokenizedExpr* e = malloc(sizeof(TokenizedExpr));
+    if (!e) error(ERROR_OUT_OF_MEMORY, lineno);
+    e->count = 0; e->capacity = 16;
+    e->entries = malloc(e->capacity * sizeof(TokenEntry));
+    if (!e->entries) error(ERROR_OUT_OF_MEMORY, lineno);
+
+    init_tokenizer(expr, lineno);
+    while (get_token() != tokEos) {
+        TokenEntry te = {0};
+        te.type = tok;
+        te.strval = NULL;
+        te.intval = 0;
+        switch (tok) {
+            case tokNumber:
+                te.intval = atoi(token);
+                break;
+            case tokVariable:
+                te.intval = token[0] - '0';
+                break;
+            case tokLiteral:
+                te.strval = hash(token);
+                break;
+            case tokLParen:
+            case tokRParen:
+                continue;
+            default:
+                break;
+        }
+        if (e->count >= e->capacity) {
+            e->capacity *= 2;
+            e->entries = realloc(e->entries, e->capacity * sizeof(TokenEntry));
+            if (!e->entries) error(ERROR_OUT_OF_MEMORY, lineno);
+        }
+        e->entries[e->count++] = te;
+    }
+    return e;
+}
+
+void free_tokenized_expr(TokenizedExpr* e) {
+    if (!e) return;
+    free(e->entries);
+    free(e);
+}
+
+int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno) {
+    top = 0;
+    token_lineno = lineno;
+    for (int i = 0; i < e->count; ++i) {
+        TokenEntry* te = &e->entries[i];
+        switch (te->type) {
+            case tokNumber: {
+                Value v; v.vt = vtInt; v.intval = te->intval; stack[top++] = v;
+            } break;
+            case tokVariable: {
+                int id = te->intval;
+                if (id < 0 || id > 9) error(ERROR_INVALID_BINDING, lineno);
+                Value v;
+                if (is_numeric(bindings[id])) {
+                    v.vt = vtInt; v.intval = atoi(bindings[id]);
+                } else {
+                    v.vt = vtString; v.strval = bindings[id];
+                }
+                stack[top++] = v;
+            } break;
+            case tokLiteral: {
+                Value v; v.vt = vtString; v.strval = te->strval; stack[top++] = v;
+            } break;
+            case tokPlus:
+            case tokMinus:
+            case tokTimes:
+            case tokDivide:
+            case tokMod:
+            case tokLt:
+            case tokGt:
+            case tokLe:
+            case tokGe:
+            case tokEq:
+            case tokNe:
+            case tokAnd:
+            case tokOr:
+            case tokXor:
+                eval_binop(te->type);
+                break;
+            case tokIsNumeric: {
+                Value v1 = stack[--top];
+                if (v1.vt == vtInt) v1.intval = 1;
+                else if (is_numeric(v1.strval)) v1.intval = 1;
+                else v1.intval = 0;
+                v1.vt = vtInt;
+                stack[top++] = v1;
+            } break;
+            case tokStartsWith: {
+                Value v1 = stack[--top];
+                Value v2 = stack[--top];
+                Value vr;
+                if (v1.vt == vtString && v2.vt == vtString) {
+                    vr.vt = vtInt;
+                    vr.intval = (strncmp(v2.strval, v1.strval, strlen(v1.strval)) == 0);
+                } else {
+                    vr.vt = vtInt; vr.intval = 0;
+                }
+                stack[top++] = vr;
+            } break;
+            case tokLParen:
+            case tokRParen:
+                /* parentheses ignored in RPN evaluation */
+                break;
+            default:
+                error(ERROR_INVALID_EXPRESSION, lineno);
+        }
+    }
+    if (top != 1 || stack[0].vt != vtInt) error(ERROR_INVALID_EXPRESSION, lineno);
+    return stack[0].intval;
+}
+
 int match_pattern_line(const char* pattern, const char* line, char* bindings[10]) {
     const char* p = pattern;
     const char* l = line;
@@ -666,8 +808,8 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, int max_window_size) {
             int matched_line_count = match_rule(rule, window_size, bindings);
             if (matched_line_count) {
                 uint8_t constraints_ok = 1;
-                if (rule->constraint) {
-                    constraints_ok = eval_expression(rule->constraint, bindings, rule->lineno);
+                if (rule->constraint_expr) {
+                    constraints_ok = eval_tokenized(rule->constraint_expr, bindings, rule->lineno);
                 }
                 if (constraints_ok) {
                     apply_replacement(rule, bindings);
@@ -790,6 +932,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < rule_count; ++i) {
         free(rules[i].pattern_lines);
         free(rules[i].replacement_lines);
+        free_tokenized_expr(rules[i].constraint_expr);
     }
     free(rules);
     return 0;

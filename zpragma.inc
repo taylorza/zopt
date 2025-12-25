@@ -10,18 +10,18 @@
 #pragma output CLIB_QUICKEXIT_STACK_SIZE = 1
 
 // default = 0x30002  : 0x10001 = halt & loop, 0x30002 = return to basic
-#pragma output CRT_ON_EXIT = 0x10001
+#pragma output CRT_ON_EXIT = 0x30002
 
 // CONTROLS FOR DOT COMMANDS > 8K
 // WE WANT TO ALLOCATE PAGES FOR 0x8000 AND HIGHER
 
 // logical -> physical lookup table only needs to cover main 64k
 
-#pragma output DOTN_LAST_PAGE = 11
+#pragma output DOTN_LAST_PAGE = 223
 
-// allocate pages for 0x8000 and up
-
-//#pragma output DOTN_MAIN_ABSOLUTE_MASK = 0x0F
+// allocate pages for 0x6000 and up
+#pragma output CRT_ORG_MAIN = 0x6000
+#pragma output DOTN_MAIN_ABSOLUTE_MASK = 0x07
 
 // use a standard z80 memory map (ie all lumped at 0x2000)
 

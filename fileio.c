@@ -9,7 +9,7 @@
 #include "platform.h"
 #include "fileio.h"
 
-#define MAX_BUFFER_SIZE 16
+#define MAX_BUFFER_SIZE 128
 #define MAX_FILES 3
 
 typedef struct FileInfo {
@@ -44,7 +44,6 @@ int16_t read_buffer(FileInfo *fi) MYCC {
     fi->r_bytes = esxdos_f_read(fi->handle, fi->readbuf, MAX_BUFFER_SIZE);
     if (errno) return -1;
     fi->r_offset = 0;
-    zx_border(1);
     return fi->r_bytes;
 }
 
@@ -85,6 +84,7 @@ int16_t read_char(FileInfo* fi) MYCC {
 }
 
 int16_t read_line(int8_t f, char* buf, int16_t size) MYCC {
+    zx_border(1);
     FileInfo* fi = &files[f];
     int16_t count = 0;
     while (count < size) {
@@ -122,6 +122,7 @@ uint16_t write_byte(FileInfo *fi, uint8_t b) MYCC {
 }
 
 int16_t write_line(int8_t f, char *buf, int16_t size) MYCC {
+    zx_border(0);
     FileInfo *fi = &files[f]; 
     int16_t byteswritten = 0;
     int8_t write_count;
@@ -132,7 +133,6 @@ int16_t write_line(int8_t f, char *buf, int16_t size) MYCC {
     }
     write_count = write_byte(fi, '\n');
     if (write_count == -1) return -1;
-    zx_border(0);
         
     return byteswritten;
 }
