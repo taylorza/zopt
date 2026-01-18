@@ -216,14 +216,33 @@ pattern:
 replacement:  
   ld de,$1
 
+# Rule : Optimize load into DE
+pattern:
+  push hl
+  ld l,$1
+  ld h,$2  
+  ex de,hl
+  pop hl
+replacement:  
+  ld e,$1
+  ld d,$2
+
+# Rule : Optimize load into DE
+pattern:
+  push hl
+  ld hl,$1
+  ex de,hl
+  pop hl
+replacement:
+  ld de,$1  
+
 # Rule: Optimize expressions with HL loaded
 pattern:
+  ex de,hl
   push hl
   ld hl,$1
   pop de
 replacement:
-  ld d,h
-  ld e,l
   ld hl,$1
 
 # Rule: Optimize expressions with locals
@@ -239,6 +258,17 @@ replacement:
   ld d,$1  
   ld l,$4
   ld h,$3
+
+pattern:
+  ld l,$1
+  ld h,$2
+  push hl
+  ld l,$1
+  ld h,$2
+replacement:
+  ld l,$1
+  ld h,$2
+  push hl
 
 pattern:
   ld l,$2
@@ -285,8 +315,8 @@ replacement:
 # Rule : Optimize out port <= 255
 pattern:
   ld hl,$1
-  ld b,h
-  ld c,l  
+  ld c,l
+  ld b,h    
   ld hl,$2
   out (c),l
 constraints:
@@ -298,8 +328,8 @@ replacement:
 # Rule : Optimize out port > 255
 pattern:
   ld hl,$1
-  ld b,h
   ld c,l
+  ld b,h  
   ld hl,$2
   out (c),l
 replacement:
@@ -491,7 +521,6 @@ pattern:
   push hl
   ld l,$3
   ld h,$2
-  
   pop de
   ld bc,9275
   out (c),e
@@ -611,25 +640,7 @@ replacement:
   inc b
   ld a,$3
   out(c),a
-
-# Rule : Optimize BC load (global)
-pattern:
-  ld hl,$1
-  ld b,h
-  ld c,l  
-replacement:
-  ld bc,$1
-
-# Rule : Optimize BC load (local)
-pattern:
-  ld l,$2
-  ld h,$1  
-  ld c,l
-  ld b,h  
-replacement:
-  ld b,$1
-  ld c,$2
-
+  
 # Rule : Optimize member loads
 pattern:
   ld hl,$1
@@ -658,3 +669,34 @@ replacement:
   xor a
   ld $1,a
   ld $2,a
+
+# Rule : Optimize unnecessary HL/DE swap (local)
+pattern:
+  ld e,$1
+  ld d,$2
+  ld l,$3
+  ld h,$4
+  ex de,hl
+replacement:
+  ld e,$3
+  ld d,$4
+  ld l,$1
+  ld h,$2
+
+# Rule : Optimize bit shift by constant (local)
+pattern:
+  ld l,$1
+  ld h,$2
+  push hl
+  ld hl,$3
+  pop de
+  ld b,l
+  $4 de,b
+constraints:
+  ($3 isnumeric)
+replacement:
+  ld e,$1
+  ld d,$2
+  ld b,$3
+  $4 de,b
+
