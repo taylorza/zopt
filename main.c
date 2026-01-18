@@ -823,17 +823,14 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size)
                     // Count lines of the pattern that were not replaced
                     int count = (int)rule->pattern_linecount - (int)rule->replacement_linecount;
 
-                    // scroll the window
-                    {
-                        int old_window_size = window_size;
-                        int P = (int)rule->pattern_linecount;
-                        int R = (int)rule->replacement_linecount;
-                        window_size -= count;
-                        int rows_to_move = old_window_size - P; /* rows after the pattern */
-                        if (rows_to_move > 0) {
-                            memmove(&window[R], &window[P], rows_to_move * sizeof(window[0]));
-                        }
+                    if (count) {
+                        // scroll the window
+                        int P = rule->pattern_linecount;
+                        int R = rule->replacement_linecount;
+                        int rows_to_move = window_size - P; // rows after the pattern
+                        memmove(&window[R], &window[P], rows_to_move * sizeof(window[0]));
                     }
+                    window_size -= count;
 
                     // fill window
                     while (window_size < max_window_size) {
