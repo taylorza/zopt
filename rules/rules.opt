@@ -14,6 +14,15 @@ pattern:
 replacement:
 -
 
+# Rule: Remove redundant push/pop
+pattern:
+  push hl
+  ld hl,$1
+  ex de,hl
+  pop hl
+pattern:  
+  ld de,$1
+
 # Rule: Optimize increment int by 1
 pattern:
   push hl
@@ -110,13 +119,13 @@ replacement:
 
 # Rule : HL to DE
 pattern:
-  ld h,$1
-  ld l,$2
-  ld d,h
+  ld l,$1
+  ld h,$2   
   ld e,l
+  ld d,h
 replacement:
-  ld d,$1
-  ld e,$2
+  ld e,$1
+  ld d,$2
 
 # Rule: Eliminate register reload
 pattern:
@@ -219,29 +228,29 @@ replacement:
 
 # Rule: Optimize expressions with locals
 pattern:
-  ld h,$1
   ld l,$2
-  push hl
-  ld h,$3
+  ld h,$1  
+  push hl  
   ld l,$4
+  ld h,$3
   pop de
 replacement:
-  ld d,$1
   ld e,$2
-  ld h,$3
+  ld d,$1  
   ld l,$4
+  ld h,$3
 
 pattern:
-  ld h,$1
   ld l,$2
+  ld h,$1  
   push hl
   ld hl,$3
   pop de
 constraints:
   ($3 isnumeric) ($3 1 <>) and
 replacement:
-  ld d,$1
   ld e,$2
+  ld d,$1  
   ld hl,$3
 
 # Rule: Optimize char variable load
@@ -321,8 +330,8 @@ replacement:
 
 # Rule : Optimize out (local)
 pattern:
-  ld h,$1
   ld l,$2
+  ld h,$1  
   ld bc,$3
   out (c),l
 replacement:
@@ -480,8 +489,9 @@ replacement:
 pattern:
   ld hl,$1
   push hl
-  ld h,$2
   ld l,$3
+  ld h,$2
+  
   pop de
   ld bc,9275
   out (c),e
@@ -545,8 +555,8 @@ replacement:
   nreg $1,a
 
 pattern:
-  ld h,$1
   ld l,$2
+  ld h,$1  
   push hl
   ld hl,$3
   pop de
@@ -564,8 +574,8 @@ replacement:
 
 # Rule : Optimize nextreg (locals+global)
 pattern:
-  ld h,$1
   ld l,$2
+  ld h,$1  
   push hl
   ld a,$3
   call ccsxt
@@ -587,8 +597,8 @@ pattern:
   ld a,$1
   call ccsxt
   push hl
-  ld h,$2
   ld l,$3
+  ld h,$2  
   pop de
   ld bc,9275
   out (c),e
@@ -612,10 +622,39 @@ replacement:
 
 # Rule : Optimize BC load (local)
 pattern:
-  ld h,$1
   ld l,$2
-  ld b,h
+  ld h,$1  
   ld c,l
+  ld b,h  
 replacement:
   ld b,$1
   ld c,$2
+
+# Rule : Optimize member loads
+pattern:
+  ld hl,$1
+  ld a,(hl)
+  inc hl
+  ld l,a
+  ld h,(hl)  
+constraints:
+  ($1 '_' startswith)
+replacement:
+  ld hl,($1)
+
+# Rule : Optimize redundant push/pop
+pattern:
+  push $1
+  pop $1
+replacement:
+-
+
+# Rule : Zero values
+pattern:
+  ld hl,0
+  ld $1,l
+  ld $2,h
+replacement:
+  xor a
+  ld $1,a
+  ld $2,a
