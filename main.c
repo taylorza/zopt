@@ -11,6 +11,30 @@
 #include "dataarea.h"
 #include "fileio.h"
 
+static void strip_asm_comment(char* s) {
+    int in_single = 0;
+    int in_double = 0;
+    for (char* p = s; *p; ++p) {
+        if (!in_double && *p == '\'') { // toggle single-quote
+            in_single = !in_single;
+            continue;
+        }
+        if (!in_single && *p == '"') { // toggle double-quote
+            in_double = !in_double;
+            continue;
+        }
+        if (!in_single && !in_double && *p == ';') {
+            *p = '\0';
+            break;
+        }
+    }
+    // trim trailing spaces
+    size_t len = strlen(s);
+    while (len && (unsigned char)s[len - 1] == ' ') {
+        s[--len] = '\0';
+    }
+}
+
 int rule_count;
 uint8_t paren_depth;
 
@@ -19,7 +43,7 @@ typedef struct TokenizedExpr TokenizedExpr;
 /* Note: pattern/replacement line counts are always <= MAX_WINDOW_SIZE (<=255)
    so use uint8_t to save space and help the optimizer. */
 
-/* Forward declarations for compiled-expression API */
+   /* Forward declarations for compiled-expression API */
 TokenizedExpr* compile_expression(const char* expr, int lineno);
 void free_tokenized_expr(TokenizedExpr* e);
 int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno);
@@ -31,7 +55,7 @@ typedef struct Rule {
     char** replacement_lines;
     uint8_t replacement_linecount;
     TokenizedExpr* constraint_expr;
-} Rule; 
+} Rule;
 
 Rule* parse_rules(const char* filename) {
     int8_t fp = open_file(filename);
@@ -111,8 +135,9 @@ Rule* parse_rules(const char* filename) {
                     if (state == STATE_IN_REPLACEMENT) {
                         if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES, current_lineno);
                         if (trimmed[0] == '-') {
-                            strcpy(window[replacement_linecount++], hash(""));                            
-                        } else {
+                            strcpy(window[replacement_linecount++], hash(""));
+                        }
+                        else {
                             strcpy(window[replacement_linecount++], line);
                         }
                     }
@@ -146,7 +171,7 @@ Rule* parse_rules(const char* filename) {
         replacement_lines = malloc(replacement_linecount * sizeof(char*));
         if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
         for (uint8_t i = 0; i < replacement_linecount; ++i)
-            replacement_lines[i] = hash(window[i]); 
+            replacement_lines[i] = hash(window[i]);
 
         Rule* rule = &rules[rule_count++];
         rule->lineno = rule_lineno;
@@ -343,8 +368,6 @@ TokenType get_token(void) {
     return tok;
 }
 
-
-
 Value stack[10];
 int top = 0;
 
@@ -377,12 +400,13 @@ void eval_binop(TokenType op) {
             {
                 char leftbuf[32];
                 char rightbuf[32];
-                const char *ls, *rs;
+                const char* ls, * rs;
                 if (x.vt == vtInt) {
                     snprintf(leftbuf, sizeof(leftbuf), "%d", x.intval);
                     ls = leftbuf;
                     rs = y.strval;
-                } else {
+                }
+                else {
                     ls = x.strval;
                     snprintf(rightbuf, sizeof(rightbuf), "%d", y.intval);
                     rs = rightbuf;
@@ -543,7 +567,7 @@ TokenizedExpr* compile_expression(const char* expr, int lineno) {
 
     init_tokenizer(expr, lineno);
     while (get_token() != tokEos) {
-        TokenEntry te = {0};
+        TokenEntry te = { 0 };
         te.type = tok;
         te.strval = NULL;
         te.intval = 0;
@@ -594,7 +618,8 @@ int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno) {
                 Value v;
                 if (is_numeric(bindings[id])) {
                     v.vt = vtInt; v.intval = atoi(bindings[id]);
-                } else {
+                }
+                else {
                     v.vt = vtString; v.strval = bindings[id];
                 }
                 stack[top++] = v;
@@ -633,7 +658,8 @@ int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno) {
                 if (v1.vt == vtString && v2.vt == vtString) {
                     vr.vt = vtInt;
                     vr.intval = (strncmp(v2.strval, v1.strval, strlen(v1.strval)) == 0);
-                } else {
+                }
+                else {
                     vr.vt = vtInt; vr.intval = 0;
                 }
                 stack[top++] = vr;
@@ -717,17 +743,17 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
 
 uint8_t match_rule(Rule* rule, uint8_t window_size, char* bindings[10]) {
     uint8_t last_line = (rule->pattern_linecount < window_size ? rule->pattern_linecount : window_size);
-    
+
     if (!match_pattern_line(rule->pattern_lines[0], window[0], bindings))
         return 0;
     if (last_line == 1) return 1;
 
-    if (!match_pattern_line(rule->pattern_lines[last_line-1], window[last_line-1], bindings))
+    if (!match_pattern_line(rule->pattern_lines[last_line - 1], window[last_line - 1], bindings))
         return 0;
-    
-    for (uint8_t i = 1; i < last_line-1; ++i) {
-        if (!match_pattern_line(rule->pattern_lines[i], window[i], bindings)) 
-            return 0;    
+
+    for (uint8_t i = 1; i < last_line - 1; ++i) {
+        if (!match_pattern_line(rule->pattern_lines[i], window[i], bindings))
+            return 0;
     }
     return rule->pattern_linecount;
 }
@@ -790,12 +816,37 @@ void apply_replacement(Rule* rule, char** bindings) {
     }
 }
 
+static int is_opt_directive(const char* line) {
+    const char* p = line;
+    while (*p == ' ') ++p;
+    if (*p != ';') return 0;
+    ++p;
+    while (*p == ' ') ++p;
+    if (*p != '#') return 0;
+    ++p;
+    if (strncmp(p, "OPT_OFF", 7) == 0) {
+        p += 7;
+    } else if (strncmp(p, "OPT_ON", 6) == 0) {
+        p += 6;
+    } else {
+        return 0;
+    }
+    while (*p == ' ') ++p;
+    if (*p != '\0') return 0;
+    // return 1 for OFF, 2 for ON
+    return (*(p - 1) == 'F') ? 1 : 2;
+}
+
 void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size) {
     uint8_t window_size = 0;
 
     while (window_size < max_window_size) {
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
         if (n < 0) break;
+        strip_asm_comment(line);
+        if (line[0] == '\0') {
+            continue; // skip empty lines and keep filling
+        }
         strcpy(window[window_size++], line);
     }
 
@@ -836,6 +887,10 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size)
                     while (window_size < max_window_size) {
                         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
                         if (n < 0) break;
+                        strip_asm_comment(line);
+                        if (line[0] == '\0') {
+                            continue; // skip empty lines and keep filling
+                        }
                         strcpy(window[window_size++], line);
                     }
                     for (uint8_t i = window_size; i < max_window_size; ++i) {
@@ -846,14 +901,29 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size)
             }
         }
 
-        write_line(out_fd, window[0], strlen(window[0]));
-        if (window_size > 1) {
-            memmove(&window[0], &window[1], (window_size - 1) * sizeof(window[0]));
+        // Only emit and decrement if we still have lines in the window
+        if (window_size > 0) {
+            if (window[0][0] != '\0') {
+                write_line(out_fd, window[0], strlen(window[0]));
+            }
+            if (window_size > 1) {
+                memmove(&window[0], &window[1], (window_size - 1) * sizeof(window[0]));
+            }
+            --window_size;
         }
-        --window_size;
-        int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
-        if (n >= 0)
-            strcpy(window[window_size++], line);
+
+        for (;;) {
+            int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
+            if (n < 0) break;  
+
+            strip_asm_comment(line);
+            if (line[0] == '\0') {
+                continue; // skip empty lines and keep filling
+            } else {
+                strcpy(window[window_size++], line);
+                break;
+            }
+        }
     }
 }
 
