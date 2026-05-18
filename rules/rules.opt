@@ -18,6 +18,15 @@ replacement:
 pattern:
   push hl
   ld hl,$1
+  pop de
+replacement:
+  ex de,hl
+  ld hl,$1
+
+# Rule: Remove redundant push/pop
+pattern:
+  push hl
+  ld hl,$1
   ex de,hl
   pop hl
 pattern:  
@@ -45,6 +54,24 @@ pattern:
   add hl,de
 replacement:
   inc hl
+
+# Rule: Optimize increment via ex de,hl
+pattern:
+  ex de,hl
+  ld hl,1
+  add hl,de
+replacement:
+  inc hl
+
+# Rule: Optimize decrement via ex de,hl
+pattern:
+  ex de,hl
+  ld hl,1
+  ex de,hl
+  xor a
+  sbc hl,de
+replacement:
+  dec hl
 
 # Rule: Optimize decrement int by 1
 pattern:
@@ -207,6 +234,21 @@ replacement:
   ld $2,+($1>>8)&255
   ld $3,+($1&255)
 
+# Rule: Negate local variable
+pattern:
+  ld l,$1
+  ld h,$2
+  ld de,0
+  ex de,hl
+  xor a
+  sbc hl,de
+replacement:
+  ld e,$1
+  ld d,$2
+  xor a
+  ld hl,0
+  sbc hl,de
+
 # Rule : Optimize load into DE
 pattern:
   push hl
@@ -226,6 +268,21 @@ pattern:
 replacement:  
   ld e,$1
   ld d,$2
+
+# Rule: Optimize dereference and compare
+pattern:
+  ld e,(hl)
+  inc hl
+  ld d,(hl)
+  ex de,hl
+  push hl
+  ld hl,$1
+  pop de
+replacement:
+  ld e,(hl)
+  inc hl
+  ld d,(hl)
+  ld hl,$1
 
 # Rule : Optimize load into DE
 pattern:
@@ -700,3 +757,9 @@ replacement:
   ld b,$3
   $4 de,b
 
+# Rule: Eliminate redundant global store/reload
+pattern:
+  ld ($1),hl
+  ld hl,($1)
+replacement:
+  ld ($1),hl

@@ -7,7 +7,7 @@
 #include "platform.h"
 #include "dataarea.h"
 
-#define STR_TBL_SIZE 512
+#define STR_TBL_SIZE 509
 
 const char* errmsg[] = {
     "OK",
@@ -48,11 +48,12 @@ char* trim(char* s) {
 }
 
 char* hash(const char* s) {
-    uint16_t h = 0x811c;
+    /* FNV-1a: good distribution with cheap Z80-friendly ops */
+    uint16_t h = 2166U;
     const char* p = s;
     while (*p) {
-        h ^= *p;
-        h *= *p++;
+        h ^= (uint8_t)*p++;
+        h += (h << 1) + (h << 4);   /* approx * 19, avoids true multiply */
     }
     h %= STR_TBL_SIZE;
 
@@ -78,11 +79,11 @@ char* hash(const char* s) {
 }
 
 void free_strtbl(void) {
-    uint16_t size = 0;
+    int size = 0;
     for (int i = 0; i < STR_TBL_SIZE; ++i) {
         HNode* p = strtbl[i];
         while (p) {
-            size += strlen(p->str)+1;
+            size += strlen(p->str) + 1;
             HNode* n = p->next;
             free(p->str);
             free(p);
@@ -92,7 +93,7 @@ void free_strtbl(void) {
     }
 }
 
-void error(ErrorType e, int lineno) MYCC {
+void error(ErrorType e, int lineno) {
     if (lineno) {
         printf("Error: line %d: %s\n", lineno, errmsg[e]);
     }

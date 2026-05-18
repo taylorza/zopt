@@ -735,6 +735,7 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
             l++;
         }
     }
+    while (*l == ' ') ++l;   /* trailing spaces in line are ignored */
     if (*l != '\0' && *l != '\n')
         return 0;
     return 1;
@@ -744,17 +745,21 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
 uint8_t match_rule(Rule* rule, uint8_t window_size, char* bindings[10]) {
     uint8_t last_line = (rule->pattern_linecount < window_size ? rule->pattern_linecount : window_size);
 
-    if (!match_pattern_line(rule->pattern_lines[0], window[0], bindings))
+#define MATCH_LINE(i) \
+    match_pattern_line(rule->pattern_lines[(i)], window[(i)], bindings)
+
+    if (!MATCH_LINE(0))
         return 0;
     if (last_line == 1) return 1;
 
-    if (!match_pattern_line(rule->pattern_lines[last_line - 1], window[last_line - 1], bindings))
+    if (!MATCH_LINE(last_line - 1))
         return 0;
 
     for (uint8_t i = 1; i < last_line - 1; ++i) {
-        if (!match_pattern_line(rule->pattern_lines[i], window[i], bindings))
+        if (!MATCH_LINE(i))
             return 0;
     }
+#undef MATCH_LINE
     return rule->pattern_linecount;
 }
 
@@ -948,7 +953,7 @@ void init(void) {
 }
 
 int main(int argc, char** argv) {
-    printf("ZOPT v0.1 (c)2025\nPeephole optimizer\n\n");
+    printf("ZOPT optimizer v0.2 (c)2026\n%s %s\n",__DATE__, __TIME__);
     if (argc < 2 || argc > 3) {
         printf("Usage:\n .zopt [rulefile] <asmfile>\n");
         printf("Default rule file:rules.opt\n\n");
@@ -971,6 +976,7 @@ int main(int argc, char** argv) {
     strcpy(output_filename, input_filename);
     strcat(output_filename, ".tmp");
 
+    printf("Loading rules\n");
     Rule* rules = parse_rules(rule_filename);
     if (!rules) return 1;
 
