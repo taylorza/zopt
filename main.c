@@ -43,10 +43,31 @@ typedef struct TokenizedExpr TokenizedExpr;
 /* Note: pattern/replacement line counts are always <= MAX_WINDOW_SIZE (<=255)
    so use uint8_t to save space and help the optimizer. */
 
-   /* Forward declarations for compiled-expression API */
+/* Forward declarations for compiled-expression API */
 TokenizedExpr* compile_expression(const char* expr, int lineno);
 void free_tokenized_expr(TokenizedExpr* e);
 int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno);
+
+static void get_mnemonic(const char* s, char* mnem) {
+    const char* p = s;
+    while (*p && !isalnum((unsigned char)*p) && *p != '$' && *p != '_') p++; // skip leading non-alphanumeric
+    int i = 0;
+    while (*p && (isalnum((unsigned char)*p) || *p == '_' || *p == '$') && i < 15) {
+        mnem[i++] = tolower((unsigned char)*p++);
+    }
+    mnem[i] = '\0';
+}
+
+#define RULE_HASH_SIZE 31
+
+static uint8_t hash_mnemonic(const char* mnem) {
+    uint8_t h = 0;
+    const char* p = mnem;
+    while (*p) {
+        h = (h << 1) ^ (*p++);
+    }
+    return h % RULE_HASH_SIZE;
+}
 
 typedef struct Rule {
     int lineno;
@@ -56,6 +77,31 @@ typedef struct Rule {
     uint8_t replacement_linecount;
     TokenizedExpr* constraint_expr;
 } Rule;
+
+typedef struct RuleNode {
+    Rule* rule;
+    struct RuleNode* next;
+} RuleNode;
+
+static RuleNode* rule_buckets[RULE_HASH_SIZE];
+static RuleNode* generic_rules = NULL;
+
+static void add_rule_to_index(Rule* rule) {
+    char mnem[16];
+    get_mnemonic(rule->pattern_lines[0], mnem);
+    RuleNode* node = malloc(sizeof(RuleNode));
+    if (!node) exit(1);
+    node->rule = rule;
+    if (mnem[0] == '$' || mnem[0] == '\0') {
+        node->next = generic_rules;
+        generic_rules = node;
+    }
+    else {
+        uint8_t h = hash_mnemonic(mnem);
+        node->next = rule_buckets[h];
+        rule_buckets[h] = node;
+    }
+}
 
 Rule* parse_rules(const char* filename) {
     int8_t fp = open_file(filename);
@@ -80,6 +126,9 @@ Rule* parse_rules(const char* filename) {
     uint8_t replacement_linecount = 0;
     TokenizedExpr* constraint_expr = NULL;
     rule_count = 0;
+    for (int i = 0; i < RULE_HASH_SIZE; i++) rule_buckets[i] = NULL;
+    generic_rules = NULL;
+
     while (read_line(fp, line, MAX_LINE_LENGTH) >= 0) {
         ++current_lineno;
         char* trimmed = trim(line);
@@ -184,6 +233,10 @@ Rule* parse_rules(const char* filename) {
         pattern_lines = NULL; pattern_linecount = 0;
         replacement_lines = NULL; replacement_linecount = 0;
         constraint_expr = NULL;
+    }
+
+    for (int i = rule_count - 1; i >= 0; i--) {
+        add_rule_to_index(&rules[i]);
     }
 
     return rules;
@@ -842,8 +895,9 @@ static int is_opt_directive(const char* line) {
     return (*(p - 1) == 'F') ? 1 : 2;
 }
 
-void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size) {
+void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
     uint8_t window_size = 0;
+    char current_mnem[16];
 
     while (window_size < max_window_size) {
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
@@ -861,50 +915,72 @@ void optimize(int8_t in_fd, int8_t out_fd, Rule* rules, uint8_t max_window_size)
 #ifdef __ZXNEXT
         zx_border(0);
 #endif      
-        for (int r = 0; r < rule_count; ++r) {
-            Rule* rule = &rules[r];
+        int rule_applied;
+        do {
+            rule_applied = 0;
+            get_mnemonic(window[0], current_mnem);
+            uint8_t h = hash_mnemonic(current_mnem);
 
-            memset(bindings, 0, sizeof(bindings));
+            RuleNode* node = rule_buckets[h];
+            int in_generic = 0;
 
-            if (rule->pattern_linecount > window_size) continue;
-            uint8_t matched_line_count = match_rule(rule, window_size, bindings);
-            if (matched_line_count) {
-                uint8_t constraints_ok = 1;
-                if (rule->constraint_expr) {
-                    constraints_ok = eval_tokenized(rule->constraint_expr, bindings, rule->lineno);
-                }
-                if (constraints_ok) {
-                    apply_replacement(rule, bindings);
+            if (!node) {
+                node = generic_rules;
+                in_generic = 1;
+            }
 
-                    // Count lines of the pattern that were not replaced
-                    int count = (int)rule->pattern_linecount - (int)rule->replacement_linecount;
+            while (node) {
+                Rule* rule = node->rule;
+                memset(bindings, 0, sizeof(bindings));
 
-                    if (count) {
-                        // scroll the window
-                        int P = rule->pattern_linecount;
-                        int R = rule->replacement_linecount;
-                        int rows_to_move = window_size - P; // rows after the pattern
-                        memmove(&window[R], &window[P], rows_to_move * sizeof(window[0]));
-                    }
-                    window_size -= count;
-
-                    // fill window
-                    while (window_size < max_window_size) {
-                        int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
-                        if (n < 0) break;
-                        strip_asm_comment(line);
-                        if (line[0] == '\0') {
-                            continue; // skip empty lines and keep filling
+                if (rule->pattern_linecount <= window_size) {
+                    uint8_t matched_line_count = match_rule(rule, window_size, bindings);
+                    if (matched_line_count) {
+                        uint8_t constraints_ok = 1;
+                        if (rule->constraint_expr) {
+                            constraints_ok = eval_tokenized(rule->constraint_expr, bindings, rule->lineno);
                         }
-                        strcpy(window[window_size++], line);
+                        if (constraints_ok) {
+                            apply_replacement(rule, bindings);
+
+                            // Count lines of the pattern that were not replaced
+                            int count = (int)rule->pattern_linecount - (int)rule->replacement_linecount;
+
+                            if (count) {
+                                // scroll the window
+                                int P = rule->pattern_linecount;
+                                int R = rule->replacement_linecount;
+                                int rows_to_move = window_size - P; // rows after the pattern
+                                memmove(&window[R], &window[P], rows_to_move * sizeof(window[0]));
+                            }
+                            window_size -= count;
+
+                            // fill window
+                            while (window_size < max_window_size) {
+                                int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
+                                if (n < 0) break;
+                                strip_asm_comment(line);
+                                if (line[0] == '\0') {
+                                    continue; // skip empty lines and keep filling
+                                }
+                                strcpy(window[window_size++], line);
+                            }
+                            for (uint8_t i = window_size; i < max_window_size; ++i) {
+                                window[i][0] = '\0';
+                            }
+                            rule_applied = 1;
+                            break;
+                        }
                     }
-                    for (uint8_t i = window_size; i < max_window_size; ++i) {
-                        window[i][0] = '\0';
-                    }
-                    r = -1; // restart rule matching
+                }
+
+                node = node->next;
+                if (!node && !in_generic) {
+                    node = generic_rules;
+                    in_generic = 1;
                 }
             }
-        }
+        } while (rule_applied);
 
         // Only emit and decrement if we still have lines in the window
         if (window_size > 0) {
@@ -936,6 +1012,20 @@ uint8_t old_speed;
 uint8_t old_border;
 
 void cleanup(void) {
+    for (int i = 0; i < RULE_HASH_SIZE; i++) {
+        RuleNode* n = rule_buckets[i];
+        while (n) {
+            RuleNode* next = n->next;
+            free(n);
+            n = next;
+        }
+    }
+    RuleNode* gn = generic_rules;
+    while (gn) {
+        RuleNode* next = gn->next;
+        free(gn);
+        gn = next;
+    }
 #ifdef __ZXNEXT
     ZXN_NEXTREGA(0x07, old_speed);
     zx_border(old_border);
@@ -999,7 +1089,7 @@ int main(int argc, char** argv) {
     }
 
     printf("Optimizing %s\n", input_filename);
-    optimize(in_fd, out_fd, rules, code_window);
+    optimize(in_fd, out_fd, code_window);
 
     close_file(in_fd);
     close_file(out_fd);
