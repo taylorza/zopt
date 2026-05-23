@@ -763,3 +763,11 @@ pattern:
   ld hl,($1)
 replacement:
   ld ($1),hl
+
+# Rule: Eliminate double ex de,hl
+pattern:
+  ex de,hl
+  ex de,hl
+replacement:
+-
+
