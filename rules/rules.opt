@@ -757,6 +757,26 @@ replacement:
   ld b,$3
   $4 de,b
 
+# Rule: Eliminate redundant IX-relative store then reload (positive offset)
+pattern:
+  ld (ix+$1),l
+  ld (ix+$2),h
+  ld l,(ix+$1)
+  ld h,(ix+$2)
+replacement:
+  ld (ix+$1),l
+  ld (ix+$2),h
+
+# Rule: Eliminate redundant IX-relative store then reload (negative offset)
+pattern:
+  ld (ix-$1),l
+  ld (ix-$2),h
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+replacement:
+  ld (ix-$1),l
+  ld (ix-$2),h
+
 # Rule: Eliminate redundant global store/reload
 pattern:
   ld ($1),hl
@@ -831,3 +851,72 @@ replacement:
   add hl,de
   ld a,$1
   ld (hl),a
+
+# Rule: Optimize loop variable increment (push discarded by following jp)
+pattern:
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+  push hl
+  inc hl
+  ld (ix-$1),l
+  ld (ix-$2),h
+  pop hl
+  jp $3
+replacement:
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+  inc hl
+  ld (ix-$1),l
+  ld (ix-$2),h
+  jp $3
+
+# Rule: Optimize loop variable increment (push discarded by following jr)
+pattern:
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+  push hl
+  inc hl
+  ld (ix-$1),l
+  ld (ix-$2),h
+  pop hl
+  jr $3
+replacement:
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+  inc hl
+  ld (ix-$1),l
+  ld (ix-$2),h
+  jr $3
+
+# Rule: Optimize add to HL result via ex de,hl
+pattern:
+  ex de,hl
+  ld hl,$1
+  add hl,de
+replacement:
+  ld de,$1
+  add hl,de
+
+# Rule: Optimize IX-relative load between push/pop (array indexing)
+pattern:
+  push hl
+  ld l,(ix+$1)
+  ld h,(ix+$2)
+  pop de
+  add hl,de
+replacement:
+  ld e,(ix+$1)
+  ld d,(ix+$2)
+  add hl,de
+
+# Rule: Optimize IX-relative load between push/pop (negative offset)
+pattern:
+  push hl
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+  pop de
+  add hl,de
+replacement:
+  ld e,(ix-$1)
+  ld d,(ix-$2)
+  add hl,de
