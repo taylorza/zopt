@@ -764,10 +764,70 @@ pattern:
 replacement:
   ld ($1),hl
 
-# Rule: Eliminate double ex de,hl
+# Rule: Eliminate double ex de,hl (they cancel each other)
 pattern:
   ex de,hl
   ex de,hl
 replacement:
 -
 
+# Rule: Zero local word via xor a
+pattern:
+  ld hl,0
+  ld (ix-$1),l
+  ld (ix-$2),h
+replacement:
+  xor a
+  ld (ix-$1),a
+  ld (ix-$2),a
+
+# Rule: Eliminate +0 offset in label address
+pattern:
+  ld hl,$1+0
+replacement:
+  ld hl,$1
+
+# Rule: IX-relative word store via pushed constant
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  ld e,ixl
+  ld d,ixh
+  add hl,de
+  pop de
+  ld (hl),e
+  inc hl
+  ld (hl),d
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld hl,$2
+  ld e,ixl
+  ld d,ixh
+  add hl,de
+  ld a,$eval($1 255 band)
+  ld (hl),a
+  inc hl
+  ld a,$eval($1 8 shr 255 band)
+  ld (hl),a
+
+# Rule: IX-relative byte store via pushed constant
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  ld e,ixl
+  ld d,ixh
+  add hl,de
+  pop de
+  ld (hl),e
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld hl,$2
+  ld e,ixl
+  ld d,ixh
+  add hl,de
+  ld a,$1
+  ld (hl),a

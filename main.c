@@ -275,6 +275,11 @@ typedef enum {
     tokAnd,
     tokOr,
     tokXor,
+    tokBand,
+    tokBor,
+    tokBxor,
+    tokShl,
+    tokShr,
     tokEos,
 } TokenType;
 
@@ -393,16 +398,24 @@ TokenType get_token(void) {
                         if (strcmp(token, "isnumeric") == 0) tok = tokIsNumeric;
                         else tok = tokLiteral;
                         break;
-                    case 's':
-                        if (strcmp(token, "startswith") == 0) tok = tokStartsWith;
-                        else tok = tokLiteral;
-                        break;
                     case 'a':
                         if (strcmp(token, "and") == 0) tok = tokAnd;
                         else tok = tokLiteral;
                         break;
+                    case 'b':
+                        if (strcmp(token, "band") == 0) tok = tokBand;
+                        else if (strcmp(token, "bor") == 0) tok = tokBor;
+                        else if (strcmp(token, "bxor") == 0) tok = tokBxor;
+                        else tok = tokLiteral;
+                        break;
                     case 'o':
                         if (strcmp(token, "or") == 0) tok = tokOr;
+                        else tok = tokLiteral;
+                        break;
+                    case 's':
+                        if (strcmp(token, "startswith") == 0) tok = tokStartsWith;
+                        else if (strcmp(token, "shl") == 0) tok = tokShl;
+                        else if (strcmp(token, "shr") == 0) tok = tokShr;
                         else tok = tokLiteral;
                         break;
                     case 'x':
@@ -495,9 +508,14 @@ void eval_binop(TokenType op) {
             case tokGe: x.intval = (x.intval >= y.intval); break;
             case tokEq: x.intval = (x.intval == y.intval); break;
             case tokNe: x.intval = (x.intval != y.intval); break;
-            case tokAnd: x.intval = (x.intval != 0) && (y.intval != 0); break;
-            case tokOr: x.intval = (x.intval != 0) || (y.intval != 0); break;
-            case tokXor: x.intval = (x.intval && !y.intval) || (!x.intval && y.intval); break;
+            case tokAnd:  x.intval = (x.intval != 0) && (y.intval != 0); break;
+            case tokOr:   x.intval = (x.intval != 0) || (y.intval != 0); break;
+            case tokXor:  x.intval = (x.intval && !y.intval) || (!x.intval && y.intval); break;
+            case tokBand: x.intval = x.intval & y.intval; break;
+            case tokBor:  x.intval = x.intval | y.intval; break;
+            case tokBxor: x.intval = x.intval ^ y.intval; break;
+            case tokShl:  x.intval = x.intval << y.intval; break;
+            case tokShr:  x.intval = x.intval >> y.intval; break;
         }
     }
     else if (x.vt == vtString && y.vt == vtString) {
@@ -694,6 +712,11 @@ int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno) {
             case tokAnd:
             case tokOr:
             case tokXor:
+            case tokBand:
+            case tokBor:
+            case tokBxor:
+            case tokShl:
+            case tokShr:
                 eval_binop(te->type);
                 break;
             case tokIsNumeric: {
@@ -1043,7 +1066,7 @@ void init(void) {
 }
 
 int main(int argc, char** argv) {
-    printf("ZOPT optimizer v0.2 (c)2026\n%s %s\n",__DATE__, __TIME__);
+    printf("ZOPT optimizer v0.3 (c)2026\n%s %s\n",__DATE__, __TIME__);
     if (argc < 2 || argc > 3) {
         printf("Usage:\n .zopt [rulefile] <asmfile>\n");
         printf("Default rule file:rules.opt\n\n");
