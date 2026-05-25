@@ -921,28 +921,6 @@ replacement:
   ld d,(ix-$2)
   add hl,de
 
-# Rule: Store small constant directly to IX-relative locals (negative, hi=0)
-pattern:
-  ld hl,$1
-  ld (ix-$2),l
-  ld (ix-$3),h
-constraints:
-  ($1 isnumeric) ($1 0 >=) and ($1 255 <=) and
-replacement:
-  ld (ix-$2),$1
-  ld (ix-$3),0
-
-# Rule: Store small constant directly to IX-relative locals (positive, hi=0)
-pattern:
-  ld hl,$1
-  ld (ix+$2),l
-  ld (ix+$3),h
-constraints:
-  ($1 isnumeric) ($1 0 >=) and ($1 255 <=) and
-replacement:
-  ld (ix+$2),$1
-  ld (ix+$3),0
-
 # Rule: Eliminate redundant IX-relative reload when HL unchanged
 pattern:
   ld l,(ix-$1)
