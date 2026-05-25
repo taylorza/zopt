@@ -58,7 +58,7 @@ static void get_mnemonic(const char* s, char* mnem) {
     mnem[i] = '\0';
 }
 
-#define RULE_HASH_SIZE 31
+#define RULE_HASH_SIZE 61
 
 static uint8_t hash_mnemonic(const char* mnem) {
     uint8_t h = 0;
@@ -66,7 +66,33 @@ static uint8_t hash_mnemonic(const char* mnem) {
     while (*p) {
         h = (h << 1) ^ (*p++);
     }
-    return h % RULE_HASH_SIZE;
+    return h & (RULE_HASH_SIZE - 1);
+}
+
+/*
+ * Build a two-level index key: "mnemonic_secondtoken"
+ * Rules whose second token starts with '$' (pure wildcard) produce only
+ * the mnemonic part and go into the per-mnemonic fallback bucket.
+ * Rules whose first token starts with '$' go into generic_rules.
+ *
+ * Only '(' and alpha characters are accepted into the second-token portion.
+ * This naturally excludes digits, '+'/'-' offsets, and other punctuation,
+ * ensuring pattern lines (which stop at '$') and concrete instruction lines
+ * (which have actual values) always produce the same key prefix.
+ */
+static void get_index_key(const char* s, char* key) {
+    char* out = key;
+    const char* p = s;
+    while (*p == ' ') p++;
+    /* copy mnemonic */
+    while (*p && *p != ' ') *out++ = (char)tolower((unsigned char)*p++);
+    while (*p == ' ') p++;
+    /* second token: if it starts with '$' it is a pure wildcard - stop here */
+    if (*p == '\0' || *p == '$') { *out = '\0'; return; }
+    *out++ = '_';
+    /* copy second token, accepting only '(' and alpha characters */
+    while (*p == '(' || isalpha((unsigned char)*p)) *out++ = (char)tolower((unsigned char)*p++);
+    *out = '\0';
 }
 
 typedef struct Rule {
@@ -83,7 +109,10 @@ typedef struct RuleNode {
     struct RuleNode* next;
 } RuleNode;
 
+/* Specific two-level buckets: mnemonic + second token */
 static RuleNode* rule_buckets[RULE_HASH_SIZE];
+/* Fallback per-mnemonic buckets: rules whose second token is a pure wildcard */
+static RuleNode* mnemonic_fallback_buckets[RULE_HASH_SIZE];
 static RuleNode* generic_rules = NULL;
 
 static void add_rule_to_index(Rule* rule) {
@@ -93,13 +122,24 @@ static void add_rule_to_index(Rule* rule) {
     if (!node) exit(1);
     node->rule = rule;
     if (mnem[0] == '$' || mnem[0] == '\0') {
+        /* First token is a wildcard - matches any instruction */
         node->next = generic_rules;
         generic_rules = node;
     }
     else {
-        uint8_t h = hash_mnemonic(mnem);
-        node->next = rule_buckets[h];
-        rule_buckets[h] = node;
+        char key[32];
+        get_index_key(rule->pattern_lines[0], key);
+        uint8_t h = hash_mnemonic(key);
+        if (strchr(key, '_')) {
+            /* Two-level specific key: mnemonic + concrete second token */
+            node->next = rule_buckets[h];
+            rule_buckets[h] = node;
+        }
+        else {
+            /* Mnemonic-only key: second token was a pure wildcard */
+            node->next = mnemonic_fallback_buckets[h];
+            mnemonic_fallback_buckets[h] = node;
+        }
     }
 }
 
@@ -127,6 +167,7 @@ Rule* parse_rules(const char* filename) {
     TokenizedExpr* constraint_expr = NULL;
     rule_count = 0;
     for (int i = 0; i < RULE_HASH_SIZE; i++) rule_buckets[i] = NULL;
+    for (int i = 0; i < RULE_HASH_SIZE; i++) mnemonic_fallback_buckets[i] = NULL;
     generic_rules = NULL;
 
     while (read_line(fp, line, MAX_LINE_LENGTH) >= 0) {
@@ -443,12 +484,43 @@ int is_numeric(const char* s) {
     const char* p = s;
     if (*p == '-' || *p == '+')
         p++;
+    /* Z80 assembler hex: $xx */
+    if (*p == '$') {
+        p++;
+        if (!isxdigit((unsigned char)*p))
+            return 0;
+        while (*p && isxdigit((unsigned char)*p))
+            p++;
+        return (*p == '\0');
+    }
+    /* C-style hex: 0x... */
+    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        p += 2;
+        if (!isxdigit((unsigned char)*p))
+            return 0;
+        while (*p && isxdigit((unsigned char)*p))
+            p++;
+        return (*p == '\0');
+    }
     while (*p) {
         if (!isdigit((unsigned char)*p))
             return 0;
         p++;
     }
     return 1;
+}
+
+/* Parse an integer from a string, supporting decimal, 0x hex, and $-prefixed Z80 hex. */
+static int parse_int(const char* s) {
+    if (s == NULL) return 0;
+    const char* p = s;
+    int sign = 1;
+    if (*p == '-') { sign = -1; p++; }
+    else if (*p == '+') { p++; }
+    if (*p == '$') {
+        return sign * (int)strtol(p + 1, NULL, 16);
+    }
+    return sign * (int)strtol(p, NULL, 0);
 }
 
 void eval_binop(TokenType op) {
@@ -557,7 +629,7 @@ int eval_expression(const char* expr, char* bindings[10], int lineno) {
                 if (id < 0 || id > 9) error(ERROR_INVALID_BINDING, lineno);
                 if (is_numeric(bindings[id])) {
                     v1.vt = vtInt;
-                    v1.intval = atoi(bindings[id]);
+                    v1.intval = parse_int(bindings[id]);
                     stack[top++] = v1;
                 }
                 else {
@@ -688,7 +760,7 @@ int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno) {
                 if (id < 0 || id > 9) error(ERROR_INVALID_BINDING, lineno);
                 Value v;
                 if (is_numeric(bindings[id])) {
-                    v.vt = vtInt; v.intval = atoi(bindings[id]);
+                    v.vt = vtInt; v.intval = parse_int(bindings[id]);
                 }
                 else {
                     v.vt = vtString; v.strval = bindings[id];
@@ -941,68 +1013,56 @@ void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
         int rule_applied;
         do {
             rule_applied = 0;
+            char index_key[32];
+            get_index_key(window[0], index_key);
             get_mnemonic(window[0], current_mnem);
-            uint8_t h = hash_mnemonic(current_mnem);
+            uint8_t hkey  = hash_mnemonic(index_key);   /* specific bucket */
+            uint8_t hmnem = hash_mnemonic(current_mnem); /* fallback bucket  */
 
-            RuleNode* node = rule_buckets[h];
-            int in_generic = 0;
-
-            if (!node) {
-                node = generic_rules;
-                in_generic = 1;
+/* Try one RuleNode chain; jumps to rule_fired on success, else falls through */
+#define TRY_CHAIN(chain_head) \
+            for (RuleNode* node = (chain_head); node; node = node->next) { \
+                Rule* rule = node->rule; \
+                memset(bindings, 0, sizeof(bindings)); \
+                if (rule->pattern_linecount <= window_size) { \
+                    if (match_rule(rule, window_size, bindings)) { \
+                        uint8_t constraints_ok = 1; \
+                        if (rule->constraint_expr) \
+                            constraints_ok = eval_tokenized(rule->constraint_expr, bindings, rule->lineno); \
+                        if (constraints_ok) { \
+                            apply_replacement(rule, bindings); \
+                            int count = (int)rule->pattern_linecount - (int)rule->replacement_linecount; \
+                            if (count) { \
+                                int P = rule->pattern_linecount; \
+                                int R = rule->replacement_linecount; \
+                                int rows_to_move = window_size - P; \
+                                memmove(&window[R], &window[P], rows_to_move * sizeof(window[0])); \
+                            } \
+                            window_size -= count; \
+                            while (window_size < max_window_size) { \
+                                int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH); \
+                                if (n < 0) break; \
+                                strip_asm_comment(line); \
+                                if (line[0] == '\0') continue; \
+                                strcpy(window[window_size++], line); \
+                            } \
+                            for (uint8_t i = window_size; i < max_window_size; ++i) window[i][0] = '\0'; \
+                            rule_applied = 1; \
+                            goto rule_fired; \
+                        } \
+                    } \
+                } \
             }
 
-            while (node) {
-                Rule* rule = node->rule;
-                memset(bindings, 0, sizeof(bindings));
+            /* 1. Specific two-level bucket (mnemonic + second token) */
+            TRY_CHAIN(rule_buckets[hkey]);
+            /* 2. Mnemonic-only fallback (second token was a pure wildcard) */
+            TRY_CHAIN(mnemonic_fallback_buckets[hmnem]);
+            /* 3. Generic (first token itself was a wildcard) */
+            TRY_CHAIN(generic_rules);
+#undef TRY_CHAIN
 
-                if (rule->pattern_linecount <= window_size) {
-                    uint8_t matched_line_count = match_rule(rule, window_size, bindings);
-                    if (matched_line_count) {
-                        uint8_t constraints_ok = 1;
-                        if (rule->constraint_expr) {
-                            constraints_ok = eval_tokenized(rule->constraint_expr, bindings, rule->lineno);
-                        }
-                        if (constraints_ok) {
-                            apply_replacement(rule, bindings);
-
-                            // Count lines of the pattern that were not replaced
-                            int count = (int)rule->pattern_linecount - (int)rule->replacement_linecount;
-
-                            if (count) {
-                                // scroll the window
-                                int P = rule->pattern_linecount;
-                                int R = rule->replacement_linecount;
-                                int rows_to_move = window_size - P; // rows after the pattern
-                                memmove(&window[R], &window[P], rows_to_move * sizeof(window[0]));
-                            }
-                            window_size -= count;
-
-                            // fill window
-                            while (window_size < max_window_size) {
-                                int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
-                                if (n < 0) break;
-                                strip_asm_comment(line);
-                                if (line[0] == '\0') {
-                                    continue; // skip empty lines and keep filling
-                                }
-                                strcpy(window[window_size++], line);
-                            }
-                            for (uint8_t i = window_size; i < max_window_size; ++i) {
-                                window[i][0] = '\0';
-                            }
-                            rule_applied = 1;
-                            break;
-                        }
-                    }
-                }
-
-                node = node->next;
-                if (!node && !in_generic) {
-                    node = generic_rules;
-                    in_generic = 1;
-                }
-            }
+            rule_fired:;
         } while (rule_applied);
 
         // Only emit and decrement if we still have lines in the window
@@ -1037,11 +1097,11 @@ uint8_t old_border;
 void cleanup(void) {
     for (int i = 0; i < RULE_HASH_SIZE; i++) {
         RuleNode* n = rule_buckets[i];
-        while (n) {
-            RuleNode* next = n->next;
-            free(n);
-            n = next;
-        }
+        while (n) { RuleNode* next = n->next; free(n); n = next; }
+    }
+    for (int i = 0; i < RULE_HASH_SIZE; i++) {
+        RuleNode* n = mnemonic_fallback_buckets[i];
+        while (n) { RuleNode* next = n->next; free(n); n = next; }
     }
     RuleNode* gn = generic_rules;
     while (gn) {

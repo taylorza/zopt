@@ -377,7 +377,7 @@ pattern:
   ld hl,$2
   out (c),l
 constraints:
-  ($1 isnumeric) ($1 255 <=) and
+  ($1 isnumeric) ($1 0 >=) and ($1 255 <=) and
 replacement:
   ld a,$2
   out ($1),a
@@ -431,7 +431,7 @@ pattern:
   ld bc,$1
   out (c),a
 constraints:
-  ($1 isnumeric) ($1 255 <=) and
+  ($1 isnumeric) ($1 0 >=) and ($1 255 <=) and
 replacement:
   out ($1),a
 
@@ -920,3 +920,50 @@ replacement:
   ld e,(ix-$1)
   ld d,(ix-$2)
   add hl,de
+
+# Rule: Store small constant directly to IX-relative locals (negative, hi=0)
+pattern:
+  ld hl,$1
+  ld (ix-$2),l
+  ld (ix-$3),h
+constraints:
+  ($1 isnumeric) ($1 0 >=) and ($1 255 <=) and
+replacement:
+  ld (ix-$2),$1
+  ld (ix-$3),0
+
+# Rule: Store small constant directly to IX-relative locals (positive, hi=0)
+pattern:
+  ld hl,$1
+  ld (ix+$2),l
+  ld (ix+$3),h
+constraints:
+  ($1 isnumeric) ($1 0 >=) and ($1 255 <=) and
+replacement:
+  ld (ix+$2),$1
+  ld (ix+$3),0
+
+# Rule: Eliminate redundant IX-relative reload when HL unchanged
+pattern:
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+  ld de,$3
+  ld (hl),e
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+replacement:
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+  ld de,$3
+  ld (hl),e
+
+# Rule: Optimize local load
+pattern:
+  ld l,(ix-$1)
+  ld h,(ix-$2)
+  ex de,hl
+  ld hl,$3
+replacement:
+  ld e,(ix-$1)
+  ld d,(ix-$2)
+  ld hl,$3
