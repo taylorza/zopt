@@ -4,57 +4,158 @@ A peephole optimizer for the ZNC Compiler
 
 ## Rule File Syntax
 
-Rules consist of three sections, one of which (the **constraints** section) is optional:
+Each rule is made up of three sections, one of which (`constraints:`) is optional. A short comment header is recommended but not required.
 
-1. **Pattern Section:**  
-   Introduced by the keyword `pattern:`, this section is followed by the code sequence you wish to match.
+```text
+# Rule: <short description>
+pattern:
+  <assembly lines to match>
+constraints:
+  <RPN expression — optional>
+replacement:
+  <assembly lines to emit>
+```
 
-2. **Constraints Section (Optional):**  
-   Introduced by the keyword `constraints:`, this section lets you specify additional requirements for the matched pattern. For example, you may require that one of the captured variables (discussed later) is a numeric constant.
+1. **`pattern:`** — The sequence of assembly lines to match in the input.
+2. **`constraints:`** — An optional RPN expression that must evaluate to non-zero for the rule to fire. Must appear before `replacement:`.
+3. **`replacement:`** — The lines to emit in place of the matched pattern. Use a single `-` to delete the matched lines entirely.
 
-3. **Replacements Section:**  
-   Introduced by the keyword `replacements:`, the lines following this section will replace the lines that were matched.
+## Placeholders
 
-## Variables
+Patterns may include up to 10 placeholders (`$1` through `$9`, and `$0`). A placeholder captures whatever token or operand appears at that position in the matched source line and can be reused in the `constraints:` and `replacement:` sections.
 
-Patterns may include literal strings and up to 10 variables (labeled `$0` through `$9`). These variables serve two purposes:
+Placeholders serve two purposes:
 
-- **Capturing Code:**  
-  They capture portions of the matched pattern to be reused in the replacement text.
+- **Capturing operands** to reuse in the replacement or to test in constraints.
+- **Enforcing consistency** — if the same placeholder appears more than once in a pattern, all occurrences must match the same text.
 
-- **Ensuring Consistency:**  
-  They help ensure that repeated parts of the matched pattern have the same values.
+Example — rewrite a redundant two-register load sequence:
 
-We'll explore these with examples later.
+```plaintext
+pattern:
+  ld hl,$1
+  push hl
+  ld hl,$2
+  pop de
+replacement:
+  ld de,$1
+  ld hl,$2
+```
 
-## Expressions
+## Deleting Code
 
-Expressions are especially useful in two cases:
+To remove a matched sequence entirely, use `-` as the sole line under `replacement:`:
 
-1. **Defining Constraints:**  
-   Use expressions to specify additional rules that the matched pattern must satisfy.
+```plaintext
+# Rule: Remove redundant exchange
+pattern:
+  push hl
+  pop de
+  ex de,hl
+replacement:
+-
+```
 
-2. **Calculating New Values:**  
-   Use expressions in the replacement text to compute values dynamically.
+## Expressions and RPN
 
-To keep the optimizer simple, expressions use **Reverse Polish Notation (RPN)**. In RPN, operands are provided first, followed by the operator. For instance:
+Both `constraints:` and `$eval(...)` in replacement lines use the same expression language written in **Reverse Polish Notation (RPN)**: operands come first, then the operator that consumes them. Parentheses are accepted as visual aids but have no effect on evaluation.
 
-- The infix expression `2 * 3` is written as:
+| Infix | RPN equivalent |
+|-------|----------------|
+| `$1 + $2` | `$1 $2 +` |
+| `($1 + 3) * 4` | `$1 3 + 4 *` |
+| `$1 >= 0 and $1 <= 255` | `$1 0 >= $1 255 <= and` |
 
-`2 3 *`
+### Operator reference
 
-- The infix expression `(2 + 3) * 4` is written as:
+#### Arithmetic (integer operands)
 
-`2 3 + 4 *`
+| Operator | Description |
+|----------|-------------|
+| `+` | Addition |
+| `-` | Subtraction |
+| `*` | Multiplication |
+| `/` | Integer division |
+| `%` | Modulo (remainder) |
 
+#### Comparison
 
-*Note:* Parentheses may be included purely as visual aids; they are not required for computation.
+Return 1 (true) or 0 (false). Work on integers or strings.
 
-## Examples
+| Operator | Description |
+|----------|-------------|
+| `<` | Less than |
+| `>` | Greater than |
+| `<=` | Less than or equal |
+| `>=` | Greater than or equal |
+| `=` | Equal |
+| `<>` | Not equal |
 
-### Optimize Zeroing the A Register
+#### Logical (integer operands)
 
-This rule replaces any occurrence of `ld a,0` with `xor a`:
+| Operator | Description |
+|----------|-------------|
+| `and` | Logical AND (non-zero = true) |
+| `or` | Logical OR |
+| `xor` | Logical XOR |
+
+#### Bitwise (integer operands)
+
+| Operator | Description |
+|----------|-------------|
+| `band` | Bitwise AND |
+| `bor` | Bitwise OR |
+| `bxor` | Bitwise XOR |
+| `shl` | Shift left |
+| `shr` | Shift right (arithmetic) |
+
+#### String / value operators
+
+| Operator | Operands | Description |
+|----------|----------|-------------|
+| `isnumeric` | value | 1 if value is a numeric constant (decimal, `0x` hex, or `$`-prefixed Z80 hex); 0 otherwise |
+| `startswith` | string prefix | 1 if string begins with prefix |
+
+## Constraints
+
+The `constraints:` block holds a single RPN expression. If it evaluates to zero the rule is skipped; otherwise the replacement is applied. The block must appear **before** `replacement:`.
+
+Example — require `$1` is a numeric constant:
+
+```plaintext
+constraints:
+  ($1 isnumeric)
+```
+
+Example — require `$1` is a port number in the range 0..255:
+
+```plaintext
+constraints:
+  ($1 isnumeric) ($1 0 >=) and ($1 255 <=) and
+```
+
+Example — require `$1` is numeric or is a compiler-generated label (starts with `_`):
+
+```plaintext
+constraints:
+  ($1 isnumeric) ($1 '_' startswith) or
+```
+
+*Note:* Parentheses in constraints serve to clarify grouping; they are not required for evaluation.
+
+## Computing Values in Replacements with `$eval`
+
+Use `$eval(RPN_expression)` inside a replacement line when the optimizer needs to compute a numeric value from captured placeholders. The result is written as a decimal integer into the output.
+
+```text
+$eval(<RPN expression>)
+```
+
+Always guard `$eval` with an `isnumeric` constraint on every placeholder used inside it.
+
+### Examples
+
+**Optimize Zeroing the A Register**
 
 ```plaintext
 pattern:
@@ -63,35 +164,29 @@ replacement:
   xor a
 ```
 
-### Remove Unnecessary Jump to the Immediate Next Line
-
-A basic one-pass compiler may emit a jump instruction even when its target is the very next line. This rule removes such redundant jumps:
+**Remove an Unnecessary Jump to the Immediate Next Line**
 
 ```plaintext
 pattern:
   jp $1
 $1
 replacement:
-  $1
+$1
 ```
 
-In this rule:
-* The first occurrence of $1 captures the target label.
-* The second occurrence ensures that the line immediately following the jump has the same label as captured.
-* The replacement simply removes the jump while preserving the label, as other parts of the code might jump to it.
+`$1` captures the target label on the first line and verifies the very next line carries that same label. The jump is removed; the label is kept because other code may branch to it.
 
-### Constant Folding
-This example optimizes code that adds two constants using the stack. Consider the following code:
+**Constant Folding**
 
-```asm
+A one-pass compiler may add two constants through the stack. This rule folds them at optimize time:
+
+```plaintext
   ld hl,4
   push hl
   ld hl,3
   pop de
   add hl,de
 ```
-
-The following rule captures this pattern and uses constraints to ensure that both captured values are numeric:
 
 ```plaintext
 pattern:
@@ -103,16 +198,115 @@ pattern:
 constraints:
   ($1 isnumeric) ($2 isnumeric) and
 replacement:
-  ld hl, $eval($1 $2 +)
+  ld hl,$eval($1 $2 +)
 ```
 
-Here:
-* The constraint verifies that both $1 and $2 are numeric.
-* The $eval function computes the sum of $1 and $2.
-* Hence, the original code is optimized to:
+With `$1 = 4` and `$2 = 3` the optimizer emits `ld hl,7`.
 
-```asm
-  ld hl,7
+**Split a 16-bit Constant into High and Low Bytes**
+
+```plaintext
+pattern:
+  ld hl,$1
+  ld $2,h
+  ld $3,l
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld $2,$eval($1 8 shr 255 band)
+  ld $3,$eval($1 255 band)
 ```
 
-**Note:** The parentheses in the constraints section serve to clarify the grouping of conditions; they are not technically required.
+`$eval($1 8 shr 255 band)` shifts right by 8 then masks, giving the high byte. `$eval($1 255 band)` masks the low byte directly.
+
+## Multiple Patterns and Variants
+
+The same logical optimization can appear in different generated forms. Write a separate `pattern:`/`replacement:` block for each variant rather than one overly-broad rule. The optimizer tries rules in file order, so place more-specific rules first.
+
+Example — increment by 1 appears in two common forms:
+
+```plaintext
+pattern:
+  ld de,$1
+  ld hl,1
+  add hl,de
+replacement:
+  inc hl
+
+pattern:
+  push hl
+  ld hl,1
+  pop de
+  add hl,de
+replacement:
+  inc hl
+```
+
+## Best Practices
+
+- Use a `# Rule:` comment header on every rule.
+- Prefer narrow, specific patterns over broad ones with many placeholders.
+- Guard any `$eval` and numeric operations with `isnumeric` constraints.
+- Ensure replacements preserve all flags and register values that the surrounding code depends on.
+- Add one rule at a time and verify it before adding more.
+- Place more-specific rules earlier in the file so they fire before related catch-all rules.
+
+## Common Pitfalls
+
+- Placeholders that are too broad and match instructions not intended.
+- Replacements that clobber flags or auxiliary registers the surrounding code relies on.
+- Using `$eval` on a placeholder without a matching `isnumeric` constraint.
+- Assuming a particular register state in the replacement that the pattern does not guarantee.
+
+## Rule Templates
+
+**Delete a matched sequence:**
+
+```plaintext
+# Rule: <short description>
+pattern:
+  <line 1>
+  <line 2>
+replacement:
+-
+```
+
+**Rewrite using captured operands:**
+
+```plaintext
+# Rule: <short description>
+pattern:
+  <instr> $1,$2
+  <instr> $3
+constraints:
+  ($1 isnumeric)
+replacement:
+  <instr> $1
+  <other> $2,$3
+```
+
+**Rewrite with a computed constant:**
+
+```plaintext
+# Rule: <short description>
+pattern:
+  <instr> $1
+  <instr> $2
+constraints:
+  ($1 isnumeric) ($2 isnumeric) and
+replacement:
+  <instr> $eval($1 $2 +)
+```
+
+## Quick Reference
+
+| Element | Description |
+|---------|-------------|
+| `# Rule: ...` | Human-readable header (optional, recommended) |
+| `pattern:` | Assembly lines to match |
+| `constraints:` | Optional RPN guard; must precede `replacement:` |
+| `replacement:` | Lines to emit; `-` alone deletes all matched lines |
+| `$1` … `$9` | Placeholders: capture operands in pattern, expand in replacement |
+| `$eval(expr)` | Evaluate an RPN expression and insert the integer result |
+| `isnumeric` | 1 if operand is a numeric constant, 0 otherwise |
+| `startswith` | 1 if string (left operand) begins with prefix (right operand) |

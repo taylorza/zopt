@@ -852,25 +852,21 @@ replacement:
   ld a,$1
   ld (hl),a
 
-# Rule: Optimize loop variable increment (push discarded by following jp)
+# Rule: Optimize global loop variable increment (discarded by jp)
 pattern:
-  ld l,(ix-$1)
-  ld h,(ix-$2)
+  ld hl,($1)
   push hl
   inc hl
-  ld (ix-$1),l
-  ld (ix-$2),h
+  ld ($1),hl
   pop hl
   jp $3
 replacement:
-  ld l,(ix-$1)
-  ld h,(ix-$2)
+  ld hl,($1)
   inc hl
-  ld (ix-$1),l
-  ld (ix-$2),h
+  ld ($1),hl
   jp $3
 
-# Rule: Optimize loop variable increment (push discarded by following jr)
+# Rule: Optimize local loop variable increment (discarded by jp)
 pattern:
   ld l,(ix-$1)
   ld h,(ix-$2)
@@ -879,14 +875,14 @@ pattern:
   ld (ix-$1),l
   ld (ix-$2),h
   pop hl
-  jr $3
+  jp $3
 replacement:
   ld l,(ix-$1)
   ld h,(ix-$2)
   inc hl
   ld (ix-$1),l
   ld (ix-$2),h
-  jr $3
+  jp $3
 
 # Rule: Optimize add to HL result via ex de,hl
 pattern:
@@ -945,3 +941,30 @@ replacement:
   ld e,(ix-$1)
   ld d,(ix-$2)
   ld hl,$3
+
+# Rule: Optimize global byte operation
+pattern:
+  ld a,($1)
+  call ccsxt
+  $2 hl
+  ld a,l
+  ld ($1),a
+replacement:
+  ld hl,$1
+  $2 (hl)
+
+# Rule: Optimize global byte operation
+pattern:
+  ld a,($1)
+  call ccsxt
+  push hl
+  $2 hl
+  ld a,l
+  ld ($1),a
+  pop hl
+replacement:
+  ld hl,$1
+  ld b,(hl)
+  $2 (hl)
+  ld a,b
+  call ccsxt
