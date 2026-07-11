@@ -1126,7 +1126,7 @@ void init(void) {
 }
 
 int main(int argc, char** argv) {
-    printf("ZOPT optimizer v0.3 (c)2026\n%s %s\n",__DATE__, __TIME__);
+    printf("ZOPT optimizer v0.3a (c)2026\n%s %s\n",__DATE__, __TIME__);
     if (argc < 2 || argc > 3) {
         printf("Usage:\n .zopt [rulefile] <asmfile>\n");
         printf("Default rule file:rules.opt\n\n");

@@ -1,7 +1,7 @@
 #ifndef DATAAREA_H_
 #define DATAAREA_H_
 
-#define MAX_LINE_LENGTH 80
+#define MAX_LINE_LENGTH 128
 #define MAX_WINDOW_SIZE 15
 
 typedef enum ErrorType {

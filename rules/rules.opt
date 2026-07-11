@@ -293,6 +293,42 @@ pattern:
 replacement:
   ld de,$1  
 
+# Rule: Replace ld hl,0; ld a,l; ld (addr),a  -> xor a; ld (addr),a
+pattern:
+  ld hl,0
+  ld a,l
+  ld ($1),a
+replacement:
+  xor a
+  ld ($1),a
+
+# Rule: Replace zeroing a 16-bit location done via HL into two immediate stores
+pattern:
+  ld hl,0
+  ld ($1),l
+  ld ($2),h
+replacement:
+  xor a
+  ld ($1),a
+  ld ($2),a
+
+# Rule: Replace push hl / pop de with direct register moves
+pattern:
+  push hl
+  pop de
+replacement:
+  ld e,l
+  ld d,h
+
+# Rule: Test zero via HL after zero-extend from A: saves 3 instructions
+pattern:
+  ld l,a
+  ld h,0
+  ld a,h
+  or l
+replacement:
+  or a
+
 # Rule: Optimize expressions with HL loaded
 pattern:
   ex de,hl
@@ -393,6 +429,25 @@ replacement:
   ld bc,$1
   ld a,$2
   out (c),a
+
+# Rule: Optimize out value
+pattern:
+  ld l,$1
+  ld h,$2
+  out (c),l
+replacement:
+  ld a,$1
+  out (c),a
+
+# Rule: Optimize load consting into BC
+pattern:
+  ld hl,$1
+  ld c,l
+  ld b,h
+constraints:
+  ($1 isnumeric)
+replacement:
+  ld bc,$1
 
 # Rule : Optimize out (global)
 pattern:
@@ -968,3 +1023,139 @@ replacement:
   $2 (hl)
   ld a,b
   call ccsxt
+
+# Rule: Unsigned 8bit < (C=1)
+pattern:
+  ld a,($1)
+  ld l,a
+  ld h,0
+  push hl
+  ld a,($2)
+  ld l,a
+  ld h,0
+  pop de
+  call ccult
+replacement:
+  ld a,($2)
+  ld b,a
+  ld a,($1)
+  cp b
+  ld hl,0
+  jr nc,$+3
+  inc hl
+
+# Rule: Unsigned 8bit <= (C=1 or Z=1)
+pattern:
+  ld a,($1)
+  ld l,a
+  ld h,0
+  push hl
+  ld a,($2)
+  ld l,a
+  ld h,0
+  pop de
+  call ccule
+replacement:
+  ld a,($2)
+  ld b,a
+  ld a,($1)
+  cp b
+  ld hl,1
+  jr c,$+5
+  jr z,$+3
+  dec hl
+
+# Rule: Unsigned 8bit > (C=0 and Z=0)
+pattern:
+  ld a,($1)
+  ld l,a
+  ld h,0
+  push hl
+  ld a,($2)
+  ld l,a
+  ld h,0
+  pop de
+  call ccule
+replacement:
+  ld a,($2)
+  ld b,a
+  ld a,($1)
+  cp b
+  ld hl,0
+  jr c,$+5
+  jr z,$+3
+  inc hl
+
+# Rule: Unsigned 8bit >= (C=0)
+pattern:
+  ld a,($1)
+  ld l,a
+  ld h,0
+  push hl
+  ld a,($2)
+  ld l,a
+  ld h,0
+  pop de
+  call ccuge
+replacement:
+  ld a,($2)
+  ld b,a
+  ld a,($1)
+  cp b
+  ld hl,1
+  jr nc,$+3
+  dec hl
+
+# Rule: Unsigned 8bit == (Z=1)
+pattern:
+  ld a,($1)
+  ld l,a
+  ld h,0
+  push hl
+  ld a,($2)
+  ld l,a
+  ld h,0
+  pop de
+  call cceq
+replacement:
+  ld a,($2)
+  ld b,a
+  ld a,($1)
+  cp b
+  ld hl,0
+  jr nz,$+3
+  inc hl
+
+# Rule: Unsigned 8bit != (Z=0)
+pattern:
+  ld a,($1)
+  ld l,a
+  ld h,0
+  push hl
+  ld a,($2)
+  ld l,a
+  ld h,0
+  pop de
+  call ccne
+replacement:
+  ld a,($2)
+  ld b,a
+  ld a,($1)
+  cp b
+  ld hl,1
+  jr nz,$+3
+  dec hl
+
+# Rule: Unnecessary ex de,hl
+pattern:
+  ex de,hl
+  ld a,(hl)
+replacement:
+  ld a,(de)
+
+# Rule: Optimize 8-bit load from DE
+pattern:
+  ex de,hl
+  ld a,l
+replacement:
+  ld a,e
