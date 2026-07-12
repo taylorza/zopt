@@ -327,6 +327,8 @@ pattern:
   ld a,h
   or l
 replacement:
+  ld l,a
+  ld h,0
   or a
 
 # Rule: Optimize expressions with HL loaded
