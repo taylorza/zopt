@@ -11,6 +11,8 @@
 #include "dataarea.h"
 #include "fileio.h"
 
+#define SEARCH_PATH "C:/ZDEV/"
+
 static void strip_asm_comment(char* s) {
     int in_single = 0;
     int in_double = 0;
@@ -143,8 +145,23 @@ static void add_rule_to_index(Rule* rule) {
     }
 }
 
-Rule* parse_rules(const char* filename) {
+int8_t probe_rules(const char* filename) {
     int8_t fp = open_file(filename);
+    if (fp < 0) {
+        char* path = malloc(strlen(filename) + sizeof(SEARCH_PATH) + 1);
+        if (!path) {
+            printf("Out of memory\n");
+            return -1;
+        }        
+        sprintf(path, "%s%s", SEARCH_PATH, filename);        
+        fp = open_file(path);
+        free(path);
+    }
+    return fp;
+}
+
+Rule* parse_rules(const char* filename) {
+    int8_t fp = probe_rules(filename);
     if (fp < 0) {
         printf("Error opening rule file: %s\n", filename);
         return NULL;
@@ -1113,6 +1130,15 @@ void cleanup(void) {
     ZXN_NEXTREGA(0x07, old_speed);
     zx_border(old_border);
 #endif
+}
+
+void load_config(const char* filename) {
+    int8_t fd = open_file(filename);
+    if (fd < 0) return;
+
+    
+    
+    close_file(fd);
 }
 
 void init(void) {
