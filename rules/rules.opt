@@ -1161,3 +1161,28 @@ pattern:
   ld a,l
 replacement:
   ld a,e
+
+######################################################
+# Rule: Optimize 8-bit store to struct references
+pattern:
+  ld l,c
+  ld h,b
+  push hl
+  ld hl,$1
+  ex de,hl
+  pop hl
+  ld (hl),e
+replacement:
+  ld a,$1
+  ld (bc),a
+
+pattern:
+  ex de,hl
+  ld c,l
+  ld b,h
+  inc hl
+  ex de,hl
+replacement:
+  ld c,e
+  ld b,d
+  inc de

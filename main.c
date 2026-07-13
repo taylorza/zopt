@@ -988,10 +988,10 @@ void apply_replacement(Rule* rule, char** bindings) {
 
 static int is_opt_directive(const char* line) {
     const char* p = line;
-    while (*p == ' ') ++p;
+    while (*p && isspace((unsigned char)*p)) ++p;
     if (*p != ';') return 0;
     ++p;
-    while (*p == ' ') ++p;
+    while (*p && isspace((unsigned char)*p)) ++p;
     if (*p != '#') return 0;
     ++p;
     if (strncmp(p, "OPT_OFF", 7) == 0) {
@@ -1001,19 +1001,88 @@ static int is_opt_directive(const char* line) {
     } else {
         return 0;
     }
-    while (*p == ' ') ++p;
+    while (*p && isspace((unsigned char)*p)) ++p;
     if (*p != '\0') return 0;
     // return 1 for OFF, 2 for ON
     return (*(p - 1) == 'F') ? 1 : 2;
 }
 
+/* Write out any lines currently buffered in the window, preserving order. */
+static void flush_window(int8_t out_fd, uint8_t* window_size) {
+    while (*window_size > 0) {
+        if (window[0][0] != '\0') {
+            write_line(out_fd, window[0], strlen(window[0]));
+        }
+        if (*window_size > 1) {
+            memmove(&window[0], &window[1], (*window_size - 1) * sizeof(window[0]));
+        }
+        --(*window_size);
+    }
+}
+
+/* Handle an OPT_OFF/OPT_ON directive that was just read into `line`.
+   Flushes any buffered window lines first so the directive (and the
+   passthrough block that follows an OPT_OFF) keeps its original position.
+   Returns 1 if the directive was handled (caller should not add `line`
+   to the window), 0 if `line` was not a directive. */
+static int handle_opt_directive(int8_t in_fd, int8_t out_fd, uint8_t* window_size, int* optimize_enabled, int dir) {
+    if (dir == 0) return 0;
+
+    flush_window(out_fd, window_size);
+    write_line(out_fd, line, strlen(line));
+
+    if (dir == 1) {
+        /* OPT_OFF: passthrough subsequent lines unchanged until OPT_ON */
+        *optimize_enabled = 0;
+        while (1) {
+            int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
+            if (n < 0) break;
+            int dir2 = is_opt_directive(line);
+            write_line(out_fd, line, strlen(line));
+            if (dir2 == 2) { *optimize_enabled = 1; break; }
+        }
+    } else {
+        /* OPT_ON */
+        *optimize_enabled = 1;
+    }
+    return 1;
+}
+
+/* Refill the window up to max_window_size after a rule replacement,
+   honoring OPT_OFF/OPT_ON directives encountered along the way. */
+static void refill_window(int8_t in_fd, int8_t out_fd, uint8_t max_window_size, uint8_t* window_size, int* optimize_enabled) {
+    while (*window_size < max_window_size) {
+        int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
+        if (n < 0) break;
+        int dir = is_opt_directive(line);
+        if (dir) {
+            /* handle_opt_directive fully processes OPT_OFF...OPT_ON (or a lone
+               OPT_ON) internally, including writing the passthrough lines and
+               restoring optimize_enabled, so we simply keep filling afterward. */
+            handle_opt_directive(in_fd, out_fd, window_size, optimize_enabled, dir);
+            continue;
+        }
+        strip_asm_comment(line);
+        if (line[0] == '\0') continue;
+        strcpy(window[(*window_size)++], line);
+    }
+    for (uint8_t i = *window_size; i < max_window_size; ++i) window[i][0] = '\0';
+}
+
 void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
     uint8_t window_size = 0;
     char current_mnem[16];
+    int optimize_enabled = 1;
 
     while (window_size < max_window_size) {
         int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
         if (n < 0) break;
+        /* Check for OPT directives before stripping comments */
+        int dir = is_opt_directive(line);
+        if (dir) {
+            handle_opt_directive(in_fd, out_fd, &window_size, &optimize_enabled, dir);
+            continue;
+        }
         strip_asm_comment(line);
         if (line[0] == '\0') {
             continue; // skip empty lines and keep filling
@@ -1028,6 +1097,21 @@ void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
         zx_border(0);
 #endif      
         int rule_applied;
+        /* If optimizations are disabled, bypass rule matching and just emit lines
+           to preserve original ordering until OPT_ON is seen. */
+        if (!optimize_enabled) {
+            if (window[0][0] != '\0') {
+                write_line(out_fd, window[0], strlen(window[0]));
+            }
+            if (window_size > 1) {
+                memmove(&window[0], &window[1], (window_size - 1) * sizeof(window[0]));
+            }
+            --window_size;
+            /* Refill the window fully (handles directives and keeps window at
+               max_window_size instead of only replacing the single emitted line) */
+            refill_window(in_fd, out_fd, max_window_size, &window_size, &optimize_enabled);
+            continue;
+        }
         do {
             rule_applied = 0;
             char index_key[32];
@@ -1056,14 +1140,7 @@ void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
                                 memmove(&window[R], &window[P], rows_to_move * sizeof(window[0])); \
                             } \
                             window_size -= count; \
-                            while (window_size < max_window_size) { \
-                                int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH); \
-                                if (n < 0) break; \
-                                strip_asm_comment(line); \
-                                if (line[0] == '\0') continue; \
-                                strcpy(window[window_size++], line); \
-                            } \
-                            for (uint8_t i = window_size; i < max_window_size; ++i) window[i][0] = '\0'; \
+                            refill_window(in_fd, out_fd, max_window_size, &window_size, &optimize_enabled); \
                             rule_applied = 1; \
                             goto rule_fired; \
                         } \
@@ -1093,18 +1170,9 @@ void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
             --window_size;
         }
 
-        for (;;) {
-            int16_t n = read_line(in_fd, line, MAX_LINE_LENGTH);
-            if (n < 0) break;  
-
-            strip_asm_comment(line);
-            if (line[0] == '\0') {
-                continue; // skip empty lines and keep filling
-            } else {
-                strcpy(window[window_size++], line);
-                break;
-            }
-        }
+        /* Refill the window fully (handles directives and keeps window at
+           max_window_size instead of only replacing the single emitted line) */
+        refill_window(in_fd, out_fd, max_window_size, &window_size, &optimize_enabled);
     }
 }
 
@@ -1152,7 +1220,7 @@ void init(void) {
 }
 
 int main(int argc, char** argv) {
-    printf("ZOPT optimizer v0.3a (c)2026\n%s %s\n",__DATE__, __TIME__);
+    printf("ZOPT optimizer v0.3b (c)2026\n%s %s\n",__DATE__, __TIME__);
     if (argc < 2 || argc > 3) {
         printf("Usage:\n .zopt [rulefile] <asmfile>\n");
         printf("Default rule file:rules.opt\n\n");
