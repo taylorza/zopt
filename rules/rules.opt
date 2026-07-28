@@ -1186,3 +1186,75 @@ replacement:
   ld c,e
   ld b,d
   inc de
+
+pattern:
+  ld l,a
+  ld h,0
+  ld a,l
+  ld ($1),a
+replacement:
+  ld ($1),a
+
+pattern:
+  ld hl,$1
+  ld e,(hl)
+  inc hl
+  ld d,(hl)
+  ex de,hl
+  ld a,(hl)
+replacement:
+  ld hl,$1
+  ld a,(hl)
+
+pattern:
+  ex de,hl
+  ld hl,$1
+  call ccne
+replacement:
+  ld de,$1
+  call ccne
+
+pattern:
+  ex de,hl
+  ld hl,$1
+  call cceq
+replacement:
+  ld de,$1
+  call cceq
+
+pattern:
+  $1 de,b
+  ex de,hl
+  push hl
+replacement:
+  $1 de,b
+  push de
+
+pattern:
+  ld l,a
+  ld h,0
+  ex de,hl
+  ld hl,$1
+  add hl,de  
+replacement:
+  ld hl,$1
+  add hl,a
+
+pattern:
+  ld a,0
+  ld (hl),a
+  inc hl
+  ld a,0
+  ld (hl),a
+replacement:
+  xor a
+  ld (hl),a
+  inc hl
+  ld (hl),a
+
+# Rule: Optimize redundant load into same register
+pattern:
+  ld $1,$2
+  ld $1,$3
+replacement:
+  ld $1,$3

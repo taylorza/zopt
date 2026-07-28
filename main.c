@@ -677,6 +677,11 @@ int eval_expression(const char* expr, char* bindings[10], int lineno) {
             case tokAnd:
             case tokOr:
             case tokXor:
+            case tokBand:
+            case tokBor:
+            case tokBxor:
+            case tokShl:
+            case tokShr:
                 eval_binop(tok);
                 get_token();
                 break;
@@ -709,6 +714,9 @@ int eval_expression(const char* expr, char* bindings[10], int lineno) {
             case tokLParen:
             case tokRParen:
                 get_token();
+                break;
+            default:
+                error(ERROR_INVALID_EXPRESSION, lineno);
                 break;
         }
     }
@@ -944,7 +952,7 @@ static void substitute_line(const char* templ, char* bindings[10], char* result,
             else if (strncmp(p, "$eval(", 6) == 0) {
                 const char* start = p + 6;
                 const char* end = start;
-                paren_depth++;
+                paren_depth = 1;
                 while (*end && paren_depth) {
                     if (*end == '(') ++paren_depth;
                     else if (*end == ')') --paren_depth;
@@ -1220,12 +1228,12 @@ void init(void) {
 }
 
 int main(int argc, char** argv) {
-    printf("ZOPT optimizer v0.3b (c)2026\n%s %s\n",__DATE__, __TIME__);
+    printf("ZOPT optimizer v0.3c (c)2026\n%s %s\n",__DATE__, __TIME__);
     if (argc < 2 || argc > 3) {
         printf("Usage:\n .zopt [rulefile] <asmfile>\n");
         printf("Default rule file:rules.opt\n\n");
         return 1;
-    }
+    } 
 
     init();
     const char* rule_filename;
