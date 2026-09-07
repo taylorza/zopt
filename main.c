@@ -41,6 +41,7 @@ int rule_count;
 uint8_t paren_depth;
 
 typedef struct TokenizedExpr TokenizedExpr;
+typedef struct Rule Rule;
 
 /* Note: pattern/replacement line counts are always <= MAX_WINDOW_SIZE (<=255)
    so use uint8_t to save space and help the optimizer. */
@@ -49,6 +50,7 @@ typedef struct TokenizedExpr TokenizedExpr;
 TokenizedExpr* compile_expression(const char* expr, int lineno);
 void free_tokenized_expr(TokenizedExpr* e);
 int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno);
+static void compile_replacement_expressions(Rule* rule);
 
 static void get_mnemonic(const char* s, char* mnem) {
     const char* p = s;
@@ -104,6 +106,8 @@ typedef struct Rule {
     char** replacement_lines;
     uint8_t replacement_linecount;
     TokenizedExpr* constraint_expr;
+    TokenizedExpr** eval_exprs;
+    int eval_expr_count;
 } Rule;
 
 typedef struct RuleNode {
@@ -261,6 +265,8 @@ Rule* parse_rules(const char* filename) {
                         rule->replacement_lines = replacement_lines;
                         rule->replacement_linecount = replacement_linecount;
                         rule->constraint_expr = constraint_expr;
+                        rule->eval_exprs = NULL;
+                        rule->eval_expr_count = 0;
 
                         pattern_lines = NULL; pattern_linecount = 0;
                         replacement_lines = NULL; replacement_linecount = 0;
@@ -287,6 +293,8 @@ Rule* parse_rules(const char* filename) {
         rule->replacement_lines = replacement_lines;
         rule->replacement_linecount = replacement_linecount;
         rule->constraint_expr = constraint_expr;
+        rule->eval_exprs = NULL;
+        rule->eval_expr_count = 0;
 
         pattern_lines = NULL; pattern_linecount = 0;
         replacement_lines = NULL; replacement_linecount = 0;
@@ -294,6 +302,7 @@ Rule* parse_rules(const char* filename) {
     }
 
     for (int i = rule_count - 1; i >= 0; i--) {
+        compile_replacement_expressions(&rules[i]);
         add_rule_to_index(&rules[i]);
     }
 
@@ -319,6 +328,7 @@ typedef enum {
     tokRParen,
     tokIsNumeric,
     tokStartsWith,
+    tokNot,
     tokPlus,
     tokMinus,
     tokTimes,
@@ -464,6 +474,10 @@ TokenType get_token(void) {
                         if (strcmp(token, "band") == 0) tok = tokBand;
                         else if (strcmp(token, "bor") == 0) tok = tokBor;
                         else if (strcmp(token, "bxor") == 0) tok = tokBxor;
+                        else tok = tokLiteral;
+                        break;
+                    case 'n':
+                        if (strcmp(token, "not") == 0) tok = tokNot;
                         else tok = tokLiteral;
                         break;
                     case 'o':
@@ -625,106 +639,6 @@ void eval_binop(TokenType op) {
     stack[top++] = x;
 }
 
-int eval_expression(const char* expr, char* bindings[10], int lineno) {
-    Value v1, v2;
-    top = 0;
-    init_tokenizer(expr, lineno);
-    get_token();
-    while (tok != tokEos) {
-        switch (tok) {
-            case tokNumber:
-            {
-                v1.vt = vtInt;
-                v1.intval = atoi(token);
-                stack[top++] = v1;
-                get_token();
-            }
-            break;
-            case tokVariable:
-            {
-                int id = token[0] - '0';
-                if (id < 0 || id > 9) error(ERROR_INVALID_BINDING, lineno);
-                if (is_numeric(bindings[id])) {
-                    v1.vt = vtInt;
-                    v1.intval = parse_int(bindings[id]);
-                    stack[top++] = v1;
-                }
-                else {
-                    v1.vt = vtString;
-                    v1.strval = bindings[id];
-                    stack[top++] = v1;
-                }
-                get_token();
-            }
-            break;
-            case tokLiteral:
-                v1.vt = vtString;
-                v1.strval = hash(token);
-                stack[top++] = v1;
-                get_token();
-                break;
-            case tokPlus:
-            case tokMinus:
-            case tokTimes:
-            case tokDivide:
-            case tokMod:
-            case tokLt:
-            case tokGt:
-            case tokLe:
-            case tokGe:
-            case tokEq:
-            case tokNe:
-            case tokAnd:
-            case tokOr:
-            case tokXor:
-            case tokBand:
-            case tokBor:
-            case tokBxor:
-            case tokShl:
-            case tokShr:
-                eval_binop(tok);
-                get_token();
-                break;
-            case tokIsNumeric:
-                v1 = stack[--top];
-                if (v1.vt == vtInt) v1.intval = 1;
-                else if (is_numeric(v1.strval)) v1.intval = 1;
-                else v1.intval = 0;
-                v1.vt = vtInt;
-                stack[top++] = v1;
-                get_token();
-                break;
-            case tokStartsWith:
-                v1 = stack[--top];
-                v2 = stack[--top];
-                if (v1.vt == vtString && v2.vt == vtString) {
-                    char* prefix = v1.strval;
-                    char* str = v2.strval;
-                    v1.intval = (strncmp(str, prefix, strlen(prefix)) == 0);
-                    v1.vt = vtInt;
-                    stack[top++] = v1;
-                }
-                else {
-                    v1.vt = vtInt;
-                    v1.intval = 0;
-                    stack[top++] = v1;
-                }
-                get_token();
-                break;
-            case tokLParen:
-            case tokRParen:
-                get_token();
-                break;
-            default:
-                error(ERROR_INVALID_EXPRESSION, lineno);
-                break;
-        }
-    }
-
-    if (top != 1 || stack[0].vt != vtInt) error(ERROR_INVALID_EXPRESSION, lineno);
-    return stack[0].intval;
-}
-
 /* Compile expression into token entries */
 TokenizedExpr* compile_expression(const char* expr, int lineno) {
     TokenizedExpr* e = malloc(sizeof(TokenizedExpr));
@@ -771,12 +685,75 @@ void free_tokenized_expr(TokenizedExpr* e) {
     free(e);
 }
 
+static const char* find_eval_end(const char* start) {
+    int depth = 1;
+    const char* p = start;
+    while (*p && depth) {
+        if (*p == '(') ++depth;
+        else if (*p == ')') --depth;
+        ++p;
+    }
+    return depth == 0 ? p : NULL;
+}
+
+static void compile_replacement_expressions(Rule* rule) {
+    int count = 0;
+    for (uint8_t i = 0; i < rule->replacement_linecount; ++i) {
+        const char* p = rule->replacement_lines[i];
+        while (*p) {
+            if (strncmp(p, "$eval(", 6) == 0) {
+                const char* end = find_eval_end(p + 6);
+                if (!end) error(ERROR_INVALID_EXPRESSION, rule->lineno);
+                ++count;
+                p = end;
+            }
+            else {
+                ++p;
+            }
+        }
+    }
+
+    if (!count) return;
+    rule->eval_exprs = malloc(count * sizeof(TokenizedExpr*));
+    if (!rule->eval_exprs) error(ERROR_OUT_OF_MEMORY, rule->lineno);
+    rule->eval_expr_count = count;
+
+    int index = 0;
+    for (uint8_t i = 0; i < rule->replacement_linecount; ++i) {
+        const char* p = rule->replacement_lines[i];
+        while (*p) {
+            if (strncmp(p, "$eval(", 6) == 0) {
+                const char* start = p + 6;
+                const char* end = find_eval_end(start);
+                int expr_len = (int)(end - start);
+                char expr[MAX_LINE_LENGTH + 1];
+                if (expr_len > MAX_LINE_LENGTH) expr_len = MAX_LINE_LENGTH;
+                strncpy(expr, start, expr_len);
+                expr[expr_len] = '\0';
+                rule->eval_exprs[index++] = compile_expression(expr, rule->lineno);
+                p = end;
+            }
+            else {
+                ++p;
+            }
+        }
+    }
+}
+
 int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno) {
     top = 0;
     token_lineno = lineno;
     for (uint16_t i = 0; i < e->count; ++i) {
         TokenEntry* te = &e->entries[i];
         switch (te->type) {
+            case tokNot: {
+                Value v1 = stack[--top];
+                if (v1.vt == vtInt) v1.intval = !v1.intval;
+                else v1.intval = v1.strval != NULL ? 0 : 1;
+                v1.vt = vtInt;
+                stack[top++] = v1;
+            }
+            break;
             case tokNumber: {
                 Value v; v.vt = vtInt; v.intval = te->intval; stack[top++] = v;
             } break;
@@ -849,6 +826,17 @@ int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno) {
     return stack[0].intval;
 }
 
+static void copy_trimmed_capture(char* destination, const char* source, int length) {
+    if (length > MAX_LINE_LENGTH) length = MAX_LINE_LENGTH;
+    const char* start = source;
+    const char* end = source + length;
+    while (start < end && isspace((unsigned char)*start)) ++start;
+    while (end > start && isspace((unsigned char)end[-1])) --end;
+    int trimmed_length = (int)(end - start);
+    memcpy(destination, start, trimmed_length);
+    destination[trimmed_length] = '\0';
+}
+
 int match_pattern_line(const char* pattern, const char* line, char* bindings[10]) {
     const char* p = pattern;
     const char* l = line;
@@ -871,12 +859,13 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
             tmp_line1[lit_len] = '\0';
             if (lit_len == 0) {
                 /* No literal after the placeholder: grab the rest of the line */
+                copy_trimmed_capture(tmp_line2, l, (int)strlen(l));
                 if (bindings[var_index]) {
-                    if (strcmp(bindings[var_index], l) != 0)
+                    if (strcmp(bindings[var_index], tmp_line2) != 0)
                         return 0;
                 }
                 else {
-                    bindings[var_index] = hash(l);
+                    bindings[var_index] = hash(tmp_line2);
                 }
                 l += strlen(l);
             }
@@ -885,9 +874,7 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
                 if (!pos)
                     return 0;
                 int var_len = pos - l;
-                if (var_len > MAX_LINE_LENGTH) var_len = MAX_LINE_LENGTH;
-                strncpy(tmp_line2, l, var_len);
-                tmp_line2[var_len] = '\0';
+                copy_trimmed_capture(tmp_line2, l, var_len);
                 if (bindings[var_index]) {
                     if (strcmp(bindings[var_index], tmp_line2) != 0)
                         return 0;
@@ -936,7 +923,7 @@ uint8_t match_rule(Rule* rule, uint8_t window_size, char* bindings[10]) {
     return rule->pattern_linecount;
 }
 
-static void substitute_line(const char* templ, char* bindings[10], char* result, int lineno) {
+static void substitute_line(const char* templ, char* bindings[10], TokenizedExpr** eval_exprs, int* eval_index, char* result, int lineno) {
     char* out = result;
     const char* p = templ;
     while (*p) {
@@ -951,23 +938,10 @@ static void substitute_line(const char* templ, char* bindings[10], char* result,
             }
             else if (strncmp(p, "$eval(", 6) == 0) {
                 const char* start = p + 6;
-                const char* end = start;
-                paren_depth = 1;
-                while (*end && paren_depth) {
-                    if (*end == '(') ++paren_depth;
-                    else if (*end == ')') --paren_depth;
-                    ++end;
-                }
-
-                if (paren_depth != 0) error(ERROR_INVALID_EXPRESSION, lineno);
-
-                int expr_len = end - start;
-                char expr[MAX_LINE_LENGTH + 1];
-                if (expr_len > MAX_LINE_LENGTH)
-                    expr_len = MAX_LINE_LENGTH;
-                strncpy(expr, start, expr_len);
-                expr[expr_len] = '\0';
-                int evaluated = eval_expression(expr, bindings, lineno);
+                const char* end = find_eval_end(start);
+                if (!end || !eval_exprs) error(ERROR_INVALID_EXPRESSION, lineno);
+                int evaluated = eval_tokenized(eval_exprs[*eval_index], bindings, lineno);
+                ++*eval_index;
                 char buf[64];
                 sprintf(buf, "%d", evaluated);
                 const char* s = buf;
@@ -986,10 +960,11 @@ static void substitute_line(const char* templ, char* bindings[10], char* result,
 }
 
 void apply_replacement(Rule* rule, char** bindings) {
+    int eval_index = 0;
     for (uint8_t i = 0; i < rule->replacement_linecount; i++) {
         const char* line = rule->replacement_lines[i];
         const char* line_body = line;
-        substitute_line(line_body, bindings, &tmp_line1[0], rule->lineno);
+        substitute_line(line_body, bindings, rule->eval_exprs, &eval_index, &tmp_line1[0], rule->lineno);
         strcpy(window[i], tmp_line1);
     }
 }
@@ -1228,7 +1203,7 @@ void init(void) {
 }
 
 int main(int argc, char** argv) {
-    printf("ZOPT optimizer v0.3c (c)2026\n%s %s\n",__DATE__, __TIME__);
+    printf("ZOPT optimizer v0.3d (c)2026\n%s %s\n",__DATE__, __TIME__);
     if (argc < 2 || argc > 3) {
         printf("Usage:\n .zopt [rulefile] <asmfile>\n");
         printf("Default rule file:rules.opt\n\n");
@@ -1287,6 +1262,9 @@ int main(int argc, char** argv) {
         free(rules[i].pattern_lines);
         free(rules[i].replacement_lines);
         free_tokenized_expr(rules[i].constraint_expr);
+        for (int j = 0; j < rules[i].eval_expr_count; ++j)
+            free_tokenized_expr(rules[i].eval_exprs[j]);
+        free(rules[i].eval_exprs);
     }
     free(rules);
     return 0;
