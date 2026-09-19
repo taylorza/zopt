@@ -9,16 +9,14 @@
 #include "platform.h"
 #include "fileio.h"
 
-#define MAX_BUFFER_SIZE 128
-#define MAX_FILES 3
+#define MAX_BUFFER_SIZE 256
+#define MAX_FILES 2
 
 typedef struct FileInfo {
-    char readbuf[MAX_BUFFER_SIZE];
-    char writebuf[MAX_BUFFER_SIZE];
+    char buf[MAX_BUFFER_SIZE];
     uint8_t handle;
-    uint16_t r_offset;
-    uint16_t w_offset;
-    uint16_t r_bytes;
+    uint16_t offset;    
+    uint16_t bytes;
 } FileInfo;
 
 FileInfo files[MAX_FILES];
@@ -26,9 +24,8 @@ FileInfo files[MAX_FILES];
 void init_file_io(void) MYCC {
     for(int8_t i=0; i<MAX_FILES; ++i) {
         files[i].handle = 255;
-        files[i].r_offset = MAX_BUFFER_SIZE;
-        files[i].w_offset = 0;
-        files[i].r_bytes = 0;
+        files[i].offset = MAX_BUFFER_SIZE;
+        files[i].bytes = 0;
     }
 }
 
@@ -41,10 +38,10 @@ int8_t find_free_slot(void) MYCC {
 
 int16_t read_buffer(FileInfo *fi) MYCC {
     errno = 0;
-    fi->r_bytes = esxdos_f_read(fi->handle, fi->readbuf, MAX_BUFFER_SIZE);
+    fi->bytes = esxdos_f_read(fi->handle, fi->buf, MAX_BUFFER_SIZE);
     if (errno) return -1;
-    fi->r_offset = 0;
-    return fi->r_bytes;
+    fi->offset = 0;
+    return fi->bytes;
 }
 
 int8_t internal_open_file(const char *filename, unsigned char mode) MYCC {
@@ -52,8 +49,8 @@ int8_t internal_open_file(const char *filename, unsigned char mode) MYCC {
     int8_t fh = find_free_slot();
     if (fh < 0) return -1;
     FileInfo *fi = &files[fh];
-    fi->r_offset = MAX_BUFFER_SIZE;
-    fi->r_bytes = 0;
+    fi->offset = mode == ESXDOS_MODE_W | ESXDOS_MODE_CT ? 0 : MAX_BUFFER_SIZE;
+    fi->bytes = 0;
     fi->handle = esx_f_open(filename, mode);
     if (fi->handle == 255 && errno) return -1;    
     return fh;
@@ -68,19 +65,19 @@ int8_t create_file(const char *filename) MYCC {
 }
 
 int16_t peek_char(FileInfo* fi) MYCC {
-    if (fi->r_offset >= fi->r_bytes) {
+    if (fi->offset >= fi->bytes) {
         int16_t bytesread = read_buffer(fi);
         if (bytesread <= 0) return -1;
     }
-    return fi->readbuf[fi->r_offset];
+    return fi->buf[fi->offset];
 }
 
 int16_t read_char(FileInfo* fi) MYCC {
-    if (fi->r_offset >= fi->r_bytes) {
+    if (fi->offset >= fi->bytes) {
         int16_t bytesread = read_buffer(fi);
         if (bytesread <= 0) return -1;
     }
-    return fi->readbuf[fi->r_offset++];
+    return fi->buf[fi->offset++];
 }
 
 int16_t read_line(int8_t f, char* buf, int16_t size) MYCC {
@@ -108,17 +105,17 @@ int16_t read_line(int8_t f, char* buf, int16_t size) MYCC {
 
 int16_t flush_write_buffer(FileInfo *fi) MYCC {
     errno = 0;
-    int16_t byteswritten = esxdos_f_write(fi->handle, fi->writebuf, fi->w_offset);
+    int16_t byteswritten = esxdos_f_write(fi->handle, fi->buf, fi->offset);
     if (errno != 0) return -1;
-    fi->w_offset = 0;
+    fi->offset = 0;
     return byteswritten;
 }
 
 uint16_t write_byte(FileInfo *fi, uint8_t b) MYCC {
-    if (fi->w_offset == MAX_BUFFER_SIZE) {
+    if (fi->offset == MAX_BUFFER_SIZE) {
         if (flush_write_buffer(fi) == -1) return -1;
     }
-    fi->writebuf[fi->w_offset++] = b;
+    fi->buf[fi->offset++] = b;
     return 1;
 }
 
@@ -143,9 +140,8 @@ void close_file(int8_t f) MYCC {
     flush_write_buffer(fi);
     esxdos_f_close(fi->handle);
     fi->handle = 255;
-    fi->r_offset = MAX_BUFFER_SIZE;
-    fi->w_offset = 0;
-    fi->r_bytes = 0;
+    fi->offset = MAX_BUFFER_SIZE;
+    fi->bytes = 0;
 }
 
 void delete_file(const char* filename) MYCC {

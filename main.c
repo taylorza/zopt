@@ -13,6 +13,15 @@
 
 #define SEARCH_PATH "C:/ZDEV/"
 
+void* safe_alloc(size_t size, uint32_t line) {
+    void* ptr = malloc(size);
+    if (!ptr) {
+        printf("Out of memory (%d)\n", line);
+        exit(1);
+    }
+    return ptr;
+}
+
 static void strip_asm_comment(char* s) {
     int in_single = 0;
     int in_double = 0;
@@ -42,13 +51,14 @@ uint8_t paren_depth;
 
 typedef struct TokenizedExpr TokenizedExpr;
 typedef struct Rule Rule;
+typedef struct RuleNode RuleNode;
 
 /* Note: pattern/replacement line counts are always <= MAX_WINDOW_SIZE (<=255)
    so use uint8_t to save space and help the optimizer. */
 
 /* Forward declarations for compiled-expression API */
 TokenizedExpr* compile_expression(const char* expr, int lineno);
-void free_tokenized_expr(TokenizedExpr* e);
+//void free_tokenized_expr(TokenizedExpr* e);
 int eval_tokenized(TokenizedExpr* e, char* bindings[10], int lineno);
 static void compile_replacement_expressions(Rule* rule);
 
@@ -84,22 +94,34 @@ static uint8_t hash_mnemonic(const char* mnem) {
  * ensuring pattern lines (which stop at '$') and concrete instruction lines
  * (which have actual values) always produce the same key prefix.
  */
-static void get_index_key(const char* s, char* key) {
+static void get_index_key(const char* s, char* key, size_t key_size) {
     char* out = key;
+    char* end = key + key_size - 1;
     const char* p = s;
     while (*p == ' ') p++;
     /* copy mnemonic */
-    while (*p && *p != ' ') *out++ = (char)tolower((unsigned char)*p++);
+    while (*p && *p != ' ' && out < end) *out++ = (char)tolower((unsigned char)*p++);
+    if (*p && *p != ' ') {
+        *end = '\0';
+        return;
+    }
     while (*p == ' ') p++;
     /* second token: if it starts with '$' it is a pure wildcard - stop here */
     if (*p == '\0' || *p == '$') { *out = '\0'; return; }
+    if (out == end) { *out = '\0'; return; }
     *out++ = '_';
     /* copy second token, accepting only '(' and alpha characters */
-    while (*p == '(' || isalpha((unsigned char)*p)) *out++ = (char)tolower((unsigned char)*p++);
+    while ((*p == '(' || isalpha((unsigned char)*p)) && out < end)
+        *out++ = (char)tolower((unsigned char)*p++);
     *out = '\0';
 }
 
-typedef struct Rule {
+struct RuleNode {
+    Rule* rule;
+    RuleNode* next;
+};
+
+struct Rule {
     int lineno;
     char** pattern_lines;
     uint8_t pattern_linecount;
@@ -108,12 +130,8 @@ typedef struct Rule {
     TokenizedExpr* constraint_expr;
     TokenizedExpr** eval_exprs;
     int eval_expr_count;
-} Rule;
-
-typedef struct RuleNode {
-    Rule* rule;
-    struct RuleNode* next;
-} RuleNode;
+    RuleNode index_node;
+};
 
 /* Specific two-level buckets: mnemonic + second token */
 static RuleNode* rule_buckets[RULE_HASH_SIZE];
@@ -124,8 +142,7 @@ static RuleNode* generic_rules = NULL;
 static void add_rule_to_index(Rule* rule) {
     char mnem[16];
     get_mnemonic(rule->pattern_lines[0], mnem);
-    RuleNode* node = malloc(sizeof(RuleNode));
-    if (!node) exit(1);
+    RuleNode* node = &rule->index_node;
     node->rule = rule;
     if (mnem[0] == '$' || mnem[0] == '\0') {
         /* First token is a wildcard - matches any instruction */
@@ -134,7 +151,7 @@ static void add_rule_to_index(Rule* rule) {
     }
     else {
         char key[32];
-        get_index_key(rule->pattern_lines[0], key);
+        get_index_key(rule->pattern_lines[0], key, sizeof(key));
         uint8_t h = hash_mnemonic(key);
         if (strchr(key, '_')) {
             /* Two-level specific key: mnemonic + concrete second token */
@@ -152,14 +169,8 @@ static void add_rule_to_index(Rule* rule) {
 int8_t probe_rules(const char* filename) {
     int8_t fp = open_file(filename);
     if (fp < 0) {
-        char* path = malloc(strlen(filename) + sizeof(SEARCH_PATH) + 1);
-        if (!path) {
-            printf("Out of memory\n");
-            return -1;
-        }        
-        sprintf(path, "%s%s", SEARCH_PATH, filename);        
-        fp = open_file(path);
-        free(path);
+        sprintf(fullpath, "%s%s", SEARCH_PATH, filename);
+        fp = open_file(fullpath);        
     }
     return fp;
 }
@@ -171,16 +182,13 @@ Rule* parse_rules(const char* filename) {
         return NULL;
     }
     int capacity = 5;
-    Rule* rules = malloc(capacity * sizeof(Rule));
-    if (rules == NULL) {
-        error(ERROR_OUT_OF_MEMORY, 0);
-        return NULL;
-    }
+    Rule* rules = safe_alloc(capacity * sizeof(Rule), __LINE__);
 
     enum { STATE_START, STATE_IN_PATTERN, STATE_IN_REPLACEMENT, STATE_IN_CONSTRAINT } state = STATE_START;
 
     int current_lineno = 0;
     int rule_lineno = 0;
+    char* pending_pattern_lines[MAX_WINDOW_SIZE];
     char** pattern_lines = NULL;
     uint8_t pattern_linecount = 0;
     char** replacement_lines = NULL;
@@ -217,16 +225,16 @@ Rule* parse_rules(const char* filename) {
                         state = STATE_IN_REPLACEMENT;
                     else if (strncmp(trimmed, "constraints:", 12) == 0)
                         state = STATE_IN_CONSTRAINT;
+                    else if (strncmp(trimmed, "pattern:", 8) == 0)
+                        error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT, current_lineno);
 
                     if (state == STATE_IN_PATTERN) {
                         if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES, current_lineno);
-                        strcpy(window[pattern_linecount++], line);
+                        strcpy(window[pattern_linecount++], trim(line));
                     }
                     else {
-                        pattern_lines = malloc(pattern_linecount * sizeof(char*));
-                        if (pattern_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
                         for (uint8_t i = 0; i < pattern_linecount; ++i)
-                            pattern_lines[i] = hash(window[i]);
+                            pending_pattern_lines[i] = hash(window[i]);
                     }
                     break;
 
@@ -244,7 +252,7 @@ Rule* parse_rules(const char* filename) {
                         state = STATE_START;
 
                     if (state == STATE_IN_REPLACEMENT) {
-                        if (pattern_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES, current_lineno);
+                        if (replacement_linecount == MAX_WINDOW_SIZE) error(ERROR_TOO_MANY_LINES, current_lineno);
                         if (trimmed[0] == '-') {
                             strcpy(window[replacement_linecount++], hash(""));
                         }
@@ -253,8 +261,10 @@ Rule* parse_rules(const char* filename) {
                         }
                     }
                     else {
-                        replacement_lines = malloc(replacement_linecount * sizeof(char*));
-                        if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
+                        pattern_lines = safe_alloc((pattern_linecount + replacement_linecount) * sizeof(char*), __LINE__);
+                        replacement_lines = pattern_lines + pattern_linecount;
+                        for (uint8_t i = 0; i < pattern_linecount; ++i)
+                            pattern_lines[i] = pending_pattern_lines[i];
                         for (uint8_t i = 0; i < replacement_linecount; ++i)
                             replacement_lines[i] = hash(window[i]);
 
@@ -281,8 +291,10 @@ Rule* parse_rules(const char* filename) {
         if (replacement_linecount == 0) error(ERROR_EXPECTED_REPLACEMENT_OR_CONSTRAINT, current_lineno);
         if (pattern_linecount == 0) error(ERROR_EXPECTED_PATTERN, current_lineno);
 
-        replacement_lines = malloc(replacement_linecount * sizeof(char*));
-        if (replacement_lines == NULL) error(ERROR_OUT_OF_MEMORY, current_lineno);
+        pattern_lines = safe_alloc((pattern_linecount + replacement_linecount) * sizeof(char*), __LINE__);
+        replacement_lines = pattern_lines + pattern_linecount;
+        for (uint8_t i = 0; i < pattern_linecount; ++i)
+            pattern_lines[i] = pending_pattern_lines[i];
         for (uint8_t i = 0; i < replacement_linecount; ++i)
             replacement_lines[i] = hash(window[i]);
 
@@ -305,7 +317,7 @@ Rule* parse_rules(const char* filename) {
         compile_replacement_expressions(&rules[i]);
         add_rule_to_index(&rules[i]);
     }
-
+    close_file(fp);
     return rules;
 }
 
@@ -359,14 +371,16 @@ int token_lineno;
 // Tokenized expression representation for compiled constraints
 typedef struct {
     TokenType type;
-    char* strval; /* interned string for literals */
-    int intval;   /* numeric value or variable index */
+    union {
+        char* strval; /* interned string for literals */
+        int intval;   /* numeric value or variable index */
+    };
 } TokenEntry;
 
 typedef struct TokenizedExpr {
     TokenEntry* entries;
-    int count;
-    int capacity;
+    uint8_t count;
+    uint8_t capacity;
 } TokenizedExpr;
 
 /* Compile an expression into a token array for fast repeated evaluation */
@@ -399,8 +413,19 @@ TokenType get_token(void) {
     switch (*tokptr) {
         case '(': *temp++ = *tokptr++; tok = tokLParen; ++paren_depth; break;
         case ')': *temp++ = *tokptr++; tok = tokRParen; --paren_depth; break;
-        case '+': *temp++ = *tokptr++; tok = tokPlus; break;
-        case '-': *temp++ = *tokptr++; tok = tokMinus; break;
+        case '+':
+        case '-':
+            if (isdigit((unsigned char)tokptr[1])) {
+                *temp++ = *tokptr++;
+                while (*tokptr && isdigit((unsigned char)*tokptr))
+                    *temp++ = *tokptr++;
+                tok = tokNumber;
+            }
+            else {
+                *temp++ = *tokptr++;
+                tok = token[0] == '+' ? tokPlus : tokMinus;
+            }
+            break;
         case '*': *temp++ = *tokptr++; tok = tokTimes; break;
         case '/': *temp++ = *tokptr++; tok = tokDivide; break;
         case '%': *temp++ = *tokptr++; tok = tokMod; break;
@@ -641,11 +666,9 @@ void eval_binop(TokenType op) {
 
 /* Compile expression into token entries */
 TokenizedExpr* compile_expression(const char* expr, int lineno) {
-    TokenizedExpr* e = malloc(sizeof(TokenizedExpr));
-    if (!e) error(ERROR_OUT_OF_MEMORY, lineno);
-    e->count = 0; e->capacity = 16;
-    e->entries = malloc(e->capacity * sizeof(TokenEntry));
-    if (!e->entries) error(ERROR_OUT_OF_MEMORY, lineno);
+    TokenizedExpr* e = safe_alloc(sizeof(TokenizedExpr), __LINE__);
+    e->count = 0; e->capacity = 12;
+    e->entries = safe_alloc(e->capacity * sizeof(TokenEntry), __LINE__);
 
     init_tokenizer(expr, lineno);
     while (get_token() != tokEos) {
@@ -670,19 +693,13 @@ TokenizedExpr* compile_expression(const char* expr, int lineno) {
                 break;
         }
         if (e->count >= e->capacity) {
-            e->capacity *= 2;
+            e->capacity += 4;
             e->entries = realloc(e->entries, e->capacity * sizeof(TokenEntry));
             if (!e->entries) error(ERROR_OUT_OF_MEMORY, lineno);
         }
         e->entries[e->count++] = te;
     }
     return e;
-}
-
-void free_tokenized_expr(TokenizedExpr* e) {
-    if (!e) return;
-    free(e->entries);
-    free(e);
 }
 
 static const char* find_eval_end(const char* start) {
@@ -714,8 +731,7 @@ static void compile_replacement_expressions(Rule* rule) {
     }
 
     if (!count) return;
-    rule->eval_exprs = malloc(count * sizeof(TokenizedExpr*));
-    if (!rule->eval_exprs) error(ERROR_OUT_OF_MEMORY, rule->lineno);
+    rule->eval_exprs = safe_alloc(count * sizeof(TokenizedExpr*), __LINE__);
     rule->eval_expr_count = count;
 
     int index = 0;
@@ -837,6 +853,38 @@ static void copy_trimmed_capture(char* destination, const char* source, int leng
     destination[trimmed_length] = '\0';
 }
 
+typedef struct BindingArena {
+    char* data;
+    size_t used;
+    size_t capacity;
+} BindingArena;
+
+static BindingArena binding_arena;
+
+static void reset_binding_arena(void) {
+    binding_arena.used = 0;
+}
+
+static char* copy_to_binding_arena(const char* source) {
+    size_t length = strlen(source) + 1;
+    size_t required = binding_arena.used + length;
+    if (required > binding_arena.capacity) {
+        size_t capacity = binding_arena.capacity ? binding_arena.capacity : 128;
+        while (capacity < required)
+            capacity *= 2;
+        char* data = realloc(binding_arena.data, capacity);
+        if (!data)
+            error(ERROR_OUT_OF_MEMORY, 0);
+        binding_arena.data = data;
+        binding_arena.capacity = capacity;
+    }
+
+    char* result = binding_arena.data + binding_arena.used;
+    memcpy(result, source, length);
+    binding_arena.used = required;
+    return result;
+}
+
 int match_pattern_line(const char* pattern, const char* line, char* bindings[10]) {
     const char* p = pattern;
     const char* l = line;
@@ -865,7 +913,7 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
                         return 0;
                 }
                 else {
-                    bindings[var_index] = hash(tmp_line2);
+                    bindings[var_index] = copy_to_binding_arena(tmp_line2);
                 }
                 l += strlen(l);
             }
@@ -880,7 +928,7 @@ int match_pattern_line(const char* pattern, const char* line, char* bindings[10]
                         return 0;
                 }
                 else {
-                    bindings[var_index] = hash(tmp_line2);
+                    bindings[var_index] = copy_to_binding_arena(tmp_line2);
                 }
                 l = pos;
                 if (strncmp(l, tmp_line1, lit_len) != 0)
@@ -1098,7 +1146,7 @@ void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
         do {
             rule_applied = 0;
             char index_key[32];
-            get_index_key(window[0], index_key);
+            get_index_key(window[0], index_key, sizeof(index_key));
             get_mnemonic(window[0], current_mnem);
             uint8_t hkey  = hash_mnemonic(index_key);   /* specific bucket */
             uint8_t hmnem = hash_mnemonic(current_mnem); /* fallback bucket  */
@@ -1107,6 +1155,7 @@ void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
 #define TRY_CHAIN(chain_head) \
             for (RuleNode* node = (chain_head); node; node = node->next) { \
                 Rule* rule = node->rule; \
+                reset_binding_arena(); \
                 memset(bindings, 0, sizeof(bindings)); \
                 if (rule->pattern_linecount <= window_size) { \
                     if (match_rule(rule, window_size, bindings)) { \
@@ -1157,6 +1206,11 @@ void optimize(int8_t in_fd, int8_t out_fd, uint8_t max_window_size) {
            max_window_size instead of only replacing the single emitted line) */
         refill_window(in_fd, out_fd, max_window_size, &window_size, &optimize_enabled);
     }
+
+    free(binding_arena.data);
+    binding_arena.data = NULL;
+    binding_arena.used = 0;
+    binding_arena.capacity = 0;
 }
 
 uint8_t old_speed;
@@ -1165,31 +1219,21 @@ uint8_t old_border;
 void cleanup(void) {
     for (int i = 0; i < RULE_HASH_SIZE; i++) {
         RuleNode* n = rule_buckets[i];
-        while (n) { RuleNode* next = n->next; free(n); n = next; }
+        while (n) { n = n->next; }
     }
     for (int i = 0; i < RULE_HASH_SIZE; i++) {
         RuleNode* n = mnemonic_fallback_buckets[i];
-        while (n) { RuleNode* next = n->next; free(n); n = next; }
+        while (n) { n = n->next; }
     }
     RuleNode* gn = generic_rules;
     while (gn) {
         RuleNode* next = gn->next;
-        free(gn);
         gn = next;
     }
 #ifdef __ZXNEXT
     ZXN_NEXTREGA(0x07, old_speed);
     zx_border(old_border);
 #endif
-}
-
-void load_config(const char* filename) {
-    int8_t fd = open_file(filename);
-    if (fd < 0) return;
-
-    
-    
-    close_file(fd);
 }
 
 void init(void) {
@@ -1257,15 +1301,5 @@ int main(int argc, char** argv) {
     delete_file(input_filename);
     rename_file(output_filename, input_filename);
 
-    free_strtbl();
-    for (int i = 0; i < rule_count; ++i) {
-        free(rules[i].pattern_lines);
-        free(rules[i].replacement_lines);
-        free_tokenized_expr(rules[i].constraint_expr);
-        for (int j = 0; j < rules[i].eval_expr_count; ++j)
-            free_tokenized_expr(rules[i].eval_exprs[j]);
-        free(rules[i].eval_exprs);
-    }
-    free(rules);
     return 0;
 }

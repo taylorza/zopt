@@ -22,6 +22,7 @@ extern char tmp_line1[];
 extern char tmp_line2[];
 extern char output_filename[];
 extern char window[][MAX_LINE_LENGTH];
+extern char fullpath[];
 
 char* trim(char* s);
 char* hash(const char* s);

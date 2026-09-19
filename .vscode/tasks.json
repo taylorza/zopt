@@ -23,7 +23,7 @@
         {
             "label": "Build",
             "type": "shell",
-            "command": "make clean all",
+            "command": "make all",
             "args": [],
             "problemMatcher": {
                 "owner": "Make",

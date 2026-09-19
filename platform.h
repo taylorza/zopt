@@ -7,4 +7,6 @@
 #define MYCC
 #endif
 
+void* safe_alloc(size_t size, uint32_t line);
+
 #endif //PLATFORM_H__

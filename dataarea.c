@@ -9,6 +9,8 @@
 
 #define STR_TBL_SIZE 509
 
+char fullpath[256];
+
 const char* errmsg[] = {
     "OK",
     "File not found",
@@ -29,8 +31,8 @@ char output_filename[MAX_LINE_LENGTH];
 char window[MAX_WINDOW_SIZE][MAX_LINE_LENGTH];
 
 typedef struct HNode {
-    char* str;
     struct HNode* next;
+    char str[];
 } HNode;
 
 HNode* strtbl[STR_TBL_SIZE] = { 0 };
@@ -65,32 +67,14 @@ char* hash(const char* s) {
         entry = entry->next;
     }
 
-    entry = malloc(sizeof(HNode));
-    if (!entry) exit(1);
-
-    entry->str = malloc(strlen(s) + 1);
-    if (!entry->str) exit(1);
+    //printf("Str: ]%s[\n", s);
+    entry = safe_alloc(sizeof(HNode) + strlen(s) + 1, __LINE__);
 
     entry->next = strtbl[h];
     strtbl[h] = entry;
 
     strcpy(entry->str, s);
     return entry->str;
-}
-
-void free_strtbl(void) {
-    int size = 0;
-    for (int i = 0; i < STR_TBL_SIZE; ++i) {
-        HNode* p = strtbl[i];
-        while (p) {
-            size += strlen(p->str) + 1;
-            HNode* n = p->next;
-            free(p->str);
-            free(p);
-            p = n;
-        }
-        strtbl[i] = NULL;
-    }
 }
 
 void error(ErrorType e, int lineno) {
