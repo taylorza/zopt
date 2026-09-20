@@ -72,7 +72,7 @@ static void get_mnemonic(const char* s, char* mnem) {
     mnem[i] = '\0';
 }
 
-#define RULE_HASH_SIZE 61
+#define RULE_HASH_SIZE 64
 
 static uint8_t hash_mnemonic(const char* mnem) {
     uint8_t h = 0;
