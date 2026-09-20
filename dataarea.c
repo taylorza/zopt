@@ -51,12 +51,13 @@ char* trim(char* s) {
 
 char* hash(const char* s) {
     /* FNV-1a: good distribution with cheap Z80-friendly ops */
-    uint16_t h = 2166U;
+    uint16_t h = 0x811c;
     const char* p = s;
     while (*p) {
         h ^= (uint8_t)*p++;
-        h += (h << 1) + (h << 4);   /* approx * 19, avoids true multiply */
+        h += (h << 8);
     }
+    h ^= (h >> 8);
     h %= STR_TBL_SIZE;
 
     HNode* entry = strtbl[h];
